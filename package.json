@@ -1,7 +1,7 @@
 {
   "name": "smatpay_kyc",
   "version": "1.0.0",
-  "description": "SmatPay KYC checks: company registration, ID and passport extraction, photo match, liveness, sanctions",
+  "description": "Smatid KYC checks: company registration, ID and passport extraction, photo match, liveness, sanctions",
   "main": "app.js",
   "private": true,
   "scripts": {

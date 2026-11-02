@@ -7,6 +7,8 @@ const db = require('./models');
 const app = express();
 const port = process.env.PORT || 8011;
 
+// Behind Caddy/nginx on the same box: take the client's IP from X-Forwarded-For.
+app.set('trust proxy', 'loopback');
 app.use(morgan('dev'));
 app.use(express.json({limit: '1mb'}));
 
@@ -17,4 +19,4 @@ db.sequelize.authenticate()
     .then(() => console.log('Database connected successfully'))
     .catch((err) => console.error('Database connection failed:', err.message));
 
-http.createServer(app).listen(port, () => console.log(`smatpay_kyc listening on ${port}`));
+http.createServer(app).listen(port, () => console.log(`Smatid KYC listening on ${port}`));

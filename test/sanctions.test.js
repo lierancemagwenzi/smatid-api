@@ -136,6 +136,9 @@ test('the endpoint answers 400 for a bad body and 502 while yente is not ready',
     const findOne = db.client.findOne;
     db.client.findOne = async () => Object.assign(db.client.build({status: 'active'}), {update: async () => {}});
     t.after(() => (db.client.findOne = findOne));
+    const create = db.api_request.create;
+    db.api_request.create = async () => {};
+    t.after(() => (db.api_request.create = create));
 
     const yente = await fakeYente(() => ({status: 503, data: {detail: 'Index not ready'}}));
     const kyc = await kycService();

@@ -16,11 +16,11 @@ module.exports = {
     accessTokenEmail: function (client, token) {
         const name = escapeHtml(client.name);
         return {
-            subject: 'Your SmatPay KYC API access token',
+            subject: 'Your Smatid KYC API access token',
             text: [
                 `Hello ${client.name},`,
                 '',
-                'Your access to the SmatPay KYC API is ready. Your access token is:',
+                'Your access to the Smatid KYC API is ready. Your access token is:',
                 '',
                 token,
                 '',
@@ -35,8 +35,8 @@ module.exports = {
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
     <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;">
       <tr><td style="padding:28px 28px 8px;">
-        <h1 style="margin:0 0 12px;font-size:20px;">Your SmatPay KYC API access token</h1>
-        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">Hello ${name}, your access to the SmatPay KYC API is ready. Your access token is:</p>
+        <h1 style="margin:0 0 12px;font-size:20px;">Your Smatid KYC API access token</h1>
+        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;">Hello ${name}, your access to the Smatid KYC API is ready. Your access token is:</p>
         <p style="margin:0 0 16px;padding:14px;background:#f0f3f6;border-radius:8px;font-family:Menlo,Consolas,monospace;font-size:14px;word-break:break-all;">${escapeHtml(token)}</p>
         <p style="margin:0 0 8px;font-size:14px;line-height:1.6;">Send it with every request as the header:</p>
         <p style="margin:0 0 16px;font-family:Menlo,Consolas,monospace;font-size:13px;word-break:break-all;">Authorization: Bearer ${escapeHtml(token)}</p>
@@ -59,7 +59,7 @@ module.exports = {
         try {
             const [res] = await sgMail.send({
                 to: client.email,
-                from: {email: process.env.MAIL_FROM_EMAIL, name: process.env.MAIL_FROM_NAME || 'SmatPay KYC'},
+                from: {email: process.env.MAIL_FROM_EMAIL, name: process.env.MAIL_FROM_NAME || 'Smatid KYC'},
                 subject,
                 text,
                 html,

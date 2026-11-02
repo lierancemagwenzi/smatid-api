@@ -61,6 +61,7 @@ test('KYC calls need an active client token', async (t) => {
             return null;
         },
     });
+    stub(t, db.api_request, {create: async () => {}});
     const call = await service(t);
 
     assert.deepStrictEqual(await call('GET', '/api/kyc/company/bad%20num'),
@@ -163,4 +164,42 @@ test('revoking a client', async (t) => {
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.client.status, 'revoked');
     assert.ok(res.body.client.revoked_at);
+});
+
+test('each KYC call is logged with its client, search, response and time', async (t) => {
+    const token = tokenHelper.newToken();
+    stub(t, db.client, {findOne: async () => row({id: 7})});
+    const logged = [];
+    let written;
+    const done = new Promise((r) => (written = r));
+    stub(t, db.api_request, {create: async (fields) => (logged.push(fields), written())});
+    const call = await service(t);
+
+    const res = await call('GET', '/api/kyc/company/bad%20num?ref=abc', {headers: {Authorization: `Bearer ${token}`}});
+    assert.strictEqual(res.status, 400);
+    await done;
+
+    assert.strictEqual(logged.length, 1);
+    const [entry] = logged;
+    assert.strictEqual(entry.client_id, 7);
+    assert.strictEqual(entry.check_type, 'company');
+    assert.strictEqual(entry.method, 'GET');
+    assert.strictEqual(entry.path, '/api/kyc/company/bad%20num?ref=abc');
+    assert.deepStrictEqual(entry.request, {params: {number: 'bad num'}, query: {ref: 'abc'}});
+    assert.strictEqual(entry.status, 400);
+    assert.deepStrictEqual(entry.response, {error: 'invalid_registration_number'});
+    assert.ok(Number.isInteger(entry.duration_ms) && entry.duration_ms >= 0);
+});
+
+test('a call without a valid token is not logged, and a failed log write does not affect the reply', async (t) => {
+    stub(t, db.client, {findOne: async () => row({})});
+    let attempts = 0;
+    stub(t, db.api_request, {create: async () => (attempts++, Promise.reject(new Error('db down')))});
+    const call = await service(t);
+
+    assert.strictEqual((await call('GET', '/api/kyc/company/bad%20num')).status, 401);
+    assert.strictEqual(attempts, 0);
+
+    const res = await call('GET', '/api/kyc/company/bad%20num', {headers: {Authorization: 'Bearer kyc_x'}});
+    assert.deepStrictEqual(res, {status: 400, body: {error: 'invalid_registration_number'}});
 });

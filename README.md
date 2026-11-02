@@ -1,6 +1,6 @@
-# smatpay_kyc
+# Smatid KYC
 
-KYC checks for SmatPay as a small Express service, laid out like `smatpay_whatsapp`
+KYC checks for Smatid as a small Express service, laid out like `smatpay_whatsapp`
 (route → controller → a helper per data source).
 
 | Check | Endpoint | Status |
@@ -46,6 +46,19 @@ curl -X POST localhost:8011/api/admin/clients/1/revoke -H "X-Admin-Key: $ADMIN_A
 - **`token_prefix`** (e.g. `kyc_aA9gK91Y`) is the token's first 12 characters, so you can tell which
   client a token belongs to without having the secret.
 - **`last_used_at`** is updated on every authenticated call.
+
+## Request log
+
+Every authenticated `/api/kyc` call is saved in `api_requests`: who called (`client_id`), which check
+(`check_type`: `company` or `sanctions`), the `method` and `path`, what was searched for (`request`: route
+params, query string and body), the HTTP `status` and full `response`, `duration_ms`, the caller's `ip`,
+and the time (`created_at`). Calls rejected for a missing or bad token aren't logged, since there's no client.
+
+The row is written after the reply has gone out. If the write fails, it's logged to the console and the
+client's reply is unaffected. Deleting a client deletes its log rows too.
+
+The log holds personal data from searches (names, ID and passport numbers, dates of birth), so treat the
+table like the rest of your KYC records.
 
 ## Company registration
 
