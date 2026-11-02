@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Something went wrong</title>
+    <style>
+        :root { --navy: #0C2A46; --accent: #2f6fb0; }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Helvetica, Arial, sans-serif;
+            background: linear-gradient(160deg, #eef3f7 0%, #dfe8f0 100%);
+            color: var(--navy);
+            display: flex; align-items: center; justify-content: center;
+            padding: 24px;
+        }
+        .card {
+            background: #fff; max-width: 560px; width: 100%;
+            border-radius: 14px;
+            box-shadow: 0 18px 50px rgba(12, 42, 70, 0.15);
+            padding: 44px 40px; text-align: center;
+        }
+        .icon {
+            width: 84px; height: 84px; margin: 0 auto 18px; border-radius: 50%;
+            background: rgba(47, 111, 176, 0.12);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .icon svg { width: 44px; height: 44px; stroke: var(--accent); }
+        h1 { font-size: 25px; margin: 0 0 10px; color: var(--navy); }
+        p { font-size: 16px; line-height: 1.6; color: #48606f; margin: 0 0 8px; }
+        .actions { margin-top: 26px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+        .btn {
+            display: inline-block; padding: 10px 22px; border-radius: 8px;
+            font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; border: 0;
+        }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-outline { background: #fff; color: var(--navy); border: 1px solid #c9d6df; }
+        .muted { font-size: 13px; color: #8496a3; margin-top: 22px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-3-6.7" />
+                <path d="M21 3v5h-5" />
+            </svg>
+        </div>
+        <h1>Something went wrong</h1>
+        <p>We couldn't complete that request. The rest of the system is still working normally.</p>
+        <p>Please try again &mdash; if the problem continues, contact support.</p>
+        <div class="actions">
+            <a href="javascript:history.back()" class="btn btn-primary">Try again</a>
+            <a href="/Home/Dashboard" class="btn btn-outline">Go to Dashboard</a>
+        </div>
+        <div class="muted">Companies and Intellectual Property Office (CIPZ)</div>
+    </div>
+</body>
+</html>

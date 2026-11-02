@@ -1,0 +1,57 @@
+# Self-hosted OpenSanctions matching API (yente), adapted from
+# https://github.com/opensanctions/yente/blob/main/docker-compose.yml
+#
+#   cd docker/yente
+#   OPENSANCTIONS_DELIVERY_TOKEN=... docker compose up -d
+#
+# The first start downloads the data and builds the index, which takes a while. Until it's done,
+# /match answers 503 and the KYC service answers 502 screening_unavailable. After that, yente
+# checks for new data every hour on its own.
+# Needs at least 8GB RAM and 60GB disk (OpenSanctions recommends 16GB RAM and an SSD).
+services:
+  index:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.2
+    expose:
+      - "9200"
+    environment:
+      - node.name=index
+      - cluster.name=opensanctions-index
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms4g -Xmx4g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - index-os-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:9200/_cluster/health || exit 1"]
+    restart: unless-stopped
+
+  app:
+    image: ghcr.io/opensanctions/yente:5.5.0
+    depends_on:
+      index:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      YENTE_INDEX_TYPE: "elasticsearch"
+      YENTE_INDEX_URL: http://index:9200
+      # Commercial use needs a bulk data licence and its delivery token, from
+      # https://www.opensanctions.org/account/bulk/. For non-commercial use, switch to
+      # /app/manifests/civic.yml, which needs no token.
+      YENTE_MANIFEST: /app/manifests/commercial.yml
+      OPENSANCTIONS_DELIVERY_TOKEN: ${OPENSANCTIONS_DELIVERY_TOKEN}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 3s
+    restart: unless-stopped
+
+volumes:
+  index-os-data: null
