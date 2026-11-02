@@ -29,13 +29,40 @@ exports.Create = async (req, res) => {
     }
 };
 
+/** Calls per client and when each last made one. */
+async function usageByClient(clientIds) {
+    const {fn, col, Op} = db.Sequelize;
+    const rows = await db.api_request.findAll({
+        where: clientIds ? {client_id: {[Op.in]: clientIds}} : undefined,
+        attributes: ['client_id', [fn('COUNT', col('id')), 'requests'], [fn('MAX', col('created_at')), 'last_request_at']],
+        group: ['client_id'],
+        raw: true,
+    });
+    return new Map(rows.map((r) => [r.client_id, {requests: Number(r.requests), last_request_at: r.last_request_at}]));
+}
+
+const NO_USAGE = {requests: 0, last_request_at: null};
+
 exports.List = async (req, res) => {
     try {
         const clients = await db.client.findAll({order: [['id', 'ASC']]});
-        return res.json({clients: clients.map((c) => c.toPublic())});
+        const usage = await usageByClient();
+        return res.json({clients: clients.map((c) => ({...c.toPublic(), ...(usage.get(c.id) || NO_USAGE)}))});
     } catch (err) {
         console.error('Client list failed:', err.message);
         return res.status(500).json({error: 'client_list_failed'});
+    }
+};
+
+exports.Show = async (req, res) => {
+    try {
+        const client = await db.client.findByPk(req.params.id);
+        if (!client) return res.status(404).json({error: 'client_not_found'});
+        const usage = await usageByClient([client.id]);
+        return res.json({client: {...client.toPublic(), ...(usage.get(client.id) || NO_USAGE)}});
+    } catch (err) {
+        console.error('Client show failed:', err.message);
+        return res.status(500).json({error: 'client_show_failed'});
     }
 };
 

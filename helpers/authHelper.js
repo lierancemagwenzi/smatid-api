@@ -28,13 +28,38 @@ module.exports = {
         }
     },
 
-    // Admin calls carry ADMIN_API_KEY in the X-Admin-Key header. Without the setting, admin is off.
-    requireAdmin: function (req, res, next) {
-        const key = process.env.ADMIN_API_KEY;
-        if (!key) return res.status(503).json({error: 'admin_disabled'});
-        if (!tokenHelper.safeEqual(req.get('X-Admin-Key') || '', key)) {
-            return res.status(401).json({error: 'unauthorized'});
+    /**
+     * Admin calls carry either a session token from POST /api/admin/login ("Authorization: Bearer adm_..."),
+     * which is what the /admin pages use, or ADMIN_API_KEY in the X-Admin-Key header, for scripts.
+     * Without ADMIN_API_KEY set, the header is refused and only sign-in works.
+     */
+    requireAdmin: async function (req, res, next) {
+        const key = req.get('X-Admin-Key');
+        if (key !== undefined) {
+            if (!process.env.ADMIN_API_KEY) return res.status(503).json({error: 'admin_key_disabled'});
+            if (!tokenHelper.safeEqual(key, process.env.ADMIN_API_KEY)) {
+                return res.status(401).json({error: 'unauthorized'});
+            }
+            req.admin = null;
+            return next();
         }
-        next();
+
+        const token = bearerToken(req);
+        if (!token) return res.status(401).json({error: 'unauthorized'});
+        try {
+            const session = await db.admin_session.findOne({
+                where: {token_hash: tokenHelper.sha256(token)},
+                include: [db.admin],
+            });
+            if (!session || !session.admin || new Date(session.expires_at) <= new Date()) {
+                return res.status(401).json({error: 'unauthorized'});
+            }
+            req.admin = session.admin;
+            req.adminSession = session;
+            next();
+        } catch (err) {
+            console.error('Admin session lookup failed:', err.message);
+            res.status(503).json({error: 'auth_unavailable'});
+        }
     },
 };

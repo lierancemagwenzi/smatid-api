@@ -9,6 +9,11 @@ module.exports = {
         return TOKEN_PREFIX + crypto.randomBytes(32).toString('base64url');
     },
 
+    /** An admin session token, given out by POST /api/admin/login. */
+    newSessionToken: function () {
+        return 'adm_' + crypto.randomBytes(32).toString('base64url');
+    },
+
     sha256: function (value) {
         return crypto.createHash('sha256').update(value).digest('hex');
     },

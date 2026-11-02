@@ -16,9 +16,10 @@ KYC checks for Smatid as a small Express service, laid out like `smatpay_whatsap
 
 ```bash
 npm install
-cp .env.example .env   # then set DB_* and ADMIN_API_KEY
+cp .env.example .env   # then set DB_*, and CORS_ORIGINS for the admin site
 npm run db:create
 npm run db:migrate
+npm run admin:create -- --email you@smatid.com --name "Your Name"   # first admin; asks for a password
 npm start              # listens on PORT (8011)
 npm test
 ```
@@ -26,8 +27,9 @@ npm test
 ## Clients and access tokens
 
 Every `/api/kyc` call needs a client access token: `Authorization: Bearer kyc_...`. Without one, or with
-a revoked one, the answer is `401`. An admin creates clients through `/api/admin`, sending
-`ADMIN_API_KEY` as the `X-Admin-Key` header. If `ADMIN_API_KEY` isn't set, the admin API answers `503`.
+a revoked one, the answer is `401`. Admins manage clients through `/api/admin`, usually from the admin
+site (`smatid_kyc_web`). Scripts can send `ADMIN_API_KEY` as the `X-Admin-Key` header instead; if
+`ADMIN_API_KEY` isn't set, that header gets a `503`.
 
 ```bash
 # Create a client. The access_token in the reply is shown this once and never again.
@@ -46,6 +48,25 @@ curl -X POST localhost:8011/api/admin/clients/1/revoke -H "X-Admin-Key: $ADMIN_A
 - **`token_prefix`** (e.g. `kyc_aA9gK91Y`) is the token's first 12 characters, so you can tell which
   client a token belongs to without having the secret.
 - **`last_used_at`** is updated on every authenticated call.
+
+## Admin API
+
+The admin site signs in with `POST /api/admin/login` (`{email, password}`) and gets back a session token
+(`adm_...`), which it sends as `Authorization: Bearer`. Sessions last `ADMIN_SESSION_HOURS` (12 by default).
+Passwords are stored as scrypt hashes, and session tokens as SHA-256 only. After 10 failed sign-ins from one
+IP in 15 minutes, sign-in answers `429` for the rest of that window.
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/admin/login`, `POST /api/admin/logout`, `GET /api/admin/me` | Sign in, sign out, who am I |
+| `GET /api/admin/clients`, `POST /api/admin/clients` | List clients (with request counts), create one |
+| `GET /api/admin/clients/:id`, `POST /api/admin/clients/:id/revoke` | One client, revoke its token |
+| `GET /api/admin/requests` | The request log, newest first. Filters: `client_id`, `check_type`, `outcome` (`ok` or `error`), `from` and `to` (`YYYY-MM-DD`, UTC), `q` (searches what was sent), `page`, `per_page` (up to 100) |
+| `GET /api/admin/requests/:id` | One request with its full request and response |
+| `GET /api/admin/stats` | Totals, per check, per day and top 10 clients. Same filters; the last 30 days by default |
+
+`npm run admin:create` adds an admin, or sets a new password for an existing one and signs them out
+everywhere. The admin site is on its own origin, so put its address in `CORS_ORIGINS`.
 
 ## Request log
 

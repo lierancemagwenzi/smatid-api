@@ -10,7 +10,8 @@
     "test": "node --test test/*.test.js",
     "db:create": "sequelize-cli db:create",
     "db:migrate": "sequelize-cli db:migrate",
-    "db:migrate:undo": "sequelize-cli db:migrate:undo"
+    "db:migrate:undo": "sequelize-cli db:migrate:undo",
+    "admin:create": "node scripts/createAdmin.js"
   },
   "engines": {
     "node": ">=20"

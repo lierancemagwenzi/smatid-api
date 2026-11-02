@@ -78,15 +78,19 @@ test('KYC calls need an active client token', async (t) => {
     assert.ok(!lookups.includes(good), 'looked up by hash, never by the raw token');
 });
 
-test('admin endpoints need ADMIN_API_KEY, and are off without it', async (t) => {
+test('X-Admin-Key works only when ADMIN_API_KEY is set, and must match', async (t) => {
+    stub(t, db.client, {findAll: async () => []});
+    stub(t, db.api_request, {findAll: async () => []});
     const call = await service(t);
     delete process.env.ADMIN_API_KEY;
-    assert.strictEqual((await call('GET', '/api/admin/clients')).status, 503);
+    assert.strictEqual((await call('GET', '/api/admin/clients')).status, 401);
+    assert.deepStrictEqual(await call('GET', '/api/admin/clients', {headers: {'X-Admin-Key': 'anything'}}),
+        {status: 503, body: {error: 'admin_key_disabled'}});
 
     process.env.ADMIN_API_KEY = 'admin-secret';
     t.after(() => delete process.env.ADMIN_API_KEY);
-    assert.strictEqual((await call('GET', '/api/admin/clients')).status, 401);
     assert.strictEqual((await call('GET', '/api/admin/clients', {headers: {'X-Admin-Key': 'wrong'}})).status, 401);
+    assert.strictEqual((await call('GET', '/api/admin/clients', {headers: {'X-Admin-Key': 'admin-secret'}})).status, 200);
 });
 
 /** Admin key and SendGrid key for one test; SendGrid itself replaced by `send`. */
