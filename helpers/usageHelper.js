@@ -54,6 +54,7 @@ module.exports = {
             status: row.status,
             ...this.result(row),
             duration_ms: row.duration_ms,
+            credits_charged: row.credits_charged || 0,
             created_at: row.createdAt,
         };
     },

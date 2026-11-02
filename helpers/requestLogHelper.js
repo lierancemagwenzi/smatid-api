@@ -34,6 +34,7 @@ module.exports = {
                     response: res.locals.responseBody === undefined ? null : res.locals.responseBody,
                     duration_ms: Date.now() - started,
                     ip: req.ip,
+                    credits_charged: res.locals.creditsCharged || 0,
                 }).catch((err) => console.error(`Could not log ${check} request:`, err.message));
             });
             next();

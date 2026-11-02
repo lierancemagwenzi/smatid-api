@@ -14,6 +14,7 @@ module.exports = (sequelize, DataTypes) => {
                 name: this.name,
                 description: this.description,
                 status: this.status,
+                credit_cost: this.credit_cost,
                 created_at: this.createdAt,
                 updated_at: this.updatedAt,
             };
@@ -25,6 +26,7 @@ module.exports = (sequelize, DataTypes) => {
         name: {type: DataTypes.STRING, allowNull: false},
         description: DataTypes.TEXT,
         status: {type: DataTypes.STRING(16), allowNull: false, defaultValue: 'enabled'},
+        credit_cost: {type: DataTypes.INTEGER, allowNull: false, defaultValue: 1},
     }, {
         sequelize,
         modelName: 'kyc_module',

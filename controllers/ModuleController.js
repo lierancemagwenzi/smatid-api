@@ -18,6 +18,11 @@ function editable(body) {
         if (!moduleHelper.STATUSES.includes(body.status)) return {error: 'status_must_be_enabled_or_disabled'};
         out.status = body.status;
     }
+    if (body.credit_cost !== undefined) {
+        const cost = Number(body.credit_cost);
+        if (!Number.isInteger(cost) || cost < 0 || cost > 1000) return {error: 'invalid_credit_cost'};
+        out.credit_cost = cost;
+    }
     return {fields: out};
 }
 

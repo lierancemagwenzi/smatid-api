@@ -21,6 +21,8 @@ module.exports = {
                 if (!found || found.status !== 'enabled') {
                     return res.status(403).json({error: 'module_disabled', module: key});
                 }
+                // For billingHelper.charge: what the check costs.
+                req.kycModule = found;
                 next();
             } catch (err) {
                 console.error(`Module check for ${key} failed:`, err.message);

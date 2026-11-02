@@ -5,6 +5,23 @@ const express = require('express');
 const db = require('../models');
 const tokenHelper = require('../helpers/tokenHelper');
 const mailHelper = require('../helpers/mailHelper');
+const billing = require('../helpers/billing/billingHelper');
+const portalAuth = require('../helpers/portalAuthHelper');
+
+/** Stands in for the users table and for transactions, which these tests have no database for. */
+function usersTable(t, existing = []) {
+    const users = [];
+    stub(t, db.user, {
+        findOne: async ({where}) => existing.find((u) => u.email === where.email) || null,
+        create: async (fields) => {
+            const u = db.user.build({id: users.length + 1, ...fields});
+            users.push(u);
+            return u;
+        },
+    });
+    stub(t, db.sequelize, {transaction: async (fn) => fn(undefined)});
+    return users;
+}
 
 /** Swaps model methods for stand-ins for the length of one test. */
 function stub(t, target, methods) {
@@ -21,12 +38,13 @@ function row(fields) {
         id: 1, name: 'Acme', token_hash: 'h', token_prefix: 'kyc_abcdefgh', createdAt: new Date(), ...fields,
     });
     c.update = async (changes) => Object.assign(c, changes);
+    c.reload = async () => c;
     return c;
 }
 
 /** Every module enabled, for tests that aren't about modules. */
 function modulesOn(t) {
-    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: where.key, status: 'enabled'})});
+    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: where.key, status: 'enabled', credit_cost: 0})});
 }
 
 async function service(t) {
@@ -110,6 +128,8 @@ function adminWithMail(t, send) {
         delete process.env.MAIL_FROM_EMAIL;
     });
     stub(t, mailHelper.sgMail, {send});
+    stub(t, billing, {startTrial: async () => null});
+    stub(t, portalAuth, {issueLinkToken: async () => 'setup-token-123'});
     return {'X-Admin-Key': 'admin-secret'};
 }
 
@@ -118,6 +138,7 @@ test('creating a client returns its token once, stores only the hash and emails 
     const admin = adminWithMail(t, async (msg) => (sent.push(msg), [{statusCode: 202}]));
     let stored;
     stub(t, db.client, {create: async (fields) => (stored = row(fields))});
+    const users = usersTable(t);
     const call = await service(t);
 
     assert.deepStrictEqual(await call('POST', '/api/admin/clients', {headers: admin, body: {}}),
@@ -146,6 +167,26 @@ test('creating a client returns its token once, stores only the hash and emails 
     assert.strictEqual(res.body.client.token_hash, undefined);
     assert.ok(res.body.client.created_at, 'created_at is shown');
     assert.ok(!JSON.stringify(res.body.client).includes(token));
+
+    // The client's first portal user: the owner, on the client's email, with a set-up link in the same email.
+    assert.strictEqual(users.length, 1);
+    assert.deepStrictEqual([users[0].email, users[0].role, users[0].name, users[0].password_hash || null], ['it@acme.co.zw', 'owner', 'Acme <Bank>', null]);
+    assert.strictEqual(res.body.user.invited, true);
+    assert.ok(sent[0].html.includes('/accept-invite?token=setup-token-123'), 'set-up link in the email');
+    assert.ok(sent[0].text.includes('Set up your account'));
+});
+
+test('the admin can name the contact, and an email that already has a portal account is refused', async (t) => {
+    const admin = adminWithMail(t, async () => [{statusCode: 202}]);
+    stub(t, db.client, {create: async (fields) => row(fields)});
+    const users = usersTable(t, [db.user.build({id: 99, email: 'taken@acme.co.zw', name: 'X', client_id: 5})]);
+    const call = await service(t);
+
+    const named = await call('POST', '/api/admin/clients', {headers: admin, body: {name: 'Acme', email: 'ops@acme.co.zw', contact_name: 'Tendai Moyo'}});
+    assert.strictEqual(named.status, 201);
+    assert.strictEqual(users[0].name, 'Tendai Moyo');
+    assert.deepStrictEqual(await call('POST', '/api/admin/clients', {headers: admin, body: {name: 'Acme 2', email: 'Taken@Acme.co.zw'}}),
+        {status: 409, body: {error: 'email_taken'}});
 });
 
 test('a failed email still creates the client and hands the admin the token', async (t) => {
@@ -153,6 +194,7 @@ test('a failed email still creates the client and hands the admin the token', as
         throw Object.assign(new Error('Forbidden'), {response: {body: {errors: [{message: 'sender not verified'}]}}});
     });
     stub(t, db.client, {create: async (fields) => row(fields)});
+    usersTable(t);
     const call = await service(t);
 
     const res = await call('POST', '/api/admin/clients', {headers: admin, body: {name: 'Acme', email: 'it@acme.co.zw'}});

@@ -34,7 +34,8 @@ async function service(t) {
 /** An in-memory modules table. */
 function moduleTable(t, rows) {
     const table = rows.map((r, i) => {
-        const m = db.kyc_module.build({id: i + 1, ...r});
+        // Free, so these tests are about switching modules, not about credits.
+        const m = db.kyc_module.build({id: i + 1, credit_cost: 0, ...r});
         m.update = async (changes) => Object.assign(m, changes);
         return m;
     });

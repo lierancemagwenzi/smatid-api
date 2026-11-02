@@ -31,6 +31,7 @@ module.exports = (sequelize, DataTypes) => {
         response: jsonColumn(DataTypes, 'response'),
         duration_ms: DataTypes.INTEGER,
         ip: DataTypes.STRING(64),
+        credits_charged: {type: DataTypes.INTEGER, allowNull: false, defaultValue: 0},
     }, {
         sequelize,
         modelName: 'api_request',

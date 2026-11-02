@@ -140,7 +140,7 @@ test('the endpoint answers 400 for a bad body and 502 while yente is not ready',
     db.api_request.create = async () => {};
     t.after(() => (db.api_request.create = create));
     const moduleLookup = db.kyc_module.findOne;
-    db.kyc_module.findOne = async () => db.kyc_module.build({key: 'sanctions-check', name: 'S', status: 'enabled'});
+    db.kyc_module.findOne = async () => db.kyc_module.build({key: 'sanctions-check', name: 'S', status: 'enabled', credit_cost: 0});
     t.after(() => (db.kyc_module.findOne = moduleLookup));
 
     const yente = await fakeYente(() => ({status: 503, data: {detail: 'Index not ready'}}));

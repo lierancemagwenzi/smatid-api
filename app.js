@@ -32,5 +32,7 @@ db.sequelize.authenticate()
 
 // Marks expired liveness sessions and sends liveness webhooks, every 30 seconds.
 require('./helpers/liveness/deliveryHelper').start();
+// Follows Smatpay payments for credit top-ups, every 20 seconds.
+require('./helpers/billing/topupHelper').start();
 
 http.createServer(app).listen(port, () => console.log(`Smatid KYC listening on ${port}`));

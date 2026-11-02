@@ -199,6 +199,27 @@ Expired sessions are marked every 30 seconds, which also sends their webhook.
 
 The face models need about 300 MB of memory once loaded, the first time a check is taken after a restart.
 
+## Payment settings
+
+The SmatPay merchant that receives credit top-ups is set by an admin in the admin site (**Settings**), not
+in `.env`: sandbox or production, the API address, merchant ID, merchant account ID, payment profile
+number, and the sandbox and production keys.
+
+- Saved in the `settings` table. Keys are encrypted with AES-256-GCM using `SETTINGS_ENCRYPTION_KEY`
+  (32 bytes, base64) from `.env`; without it, keys can't be saved. Never change that key once keys are
+  saved, or they can't be read.
+- Keys are never sent back: the admin site only sees whether each is set and its last 4 characters.
+  Leaving a key blank keeps it; **Remove saved key** clears it.
+- **Check connection** signs in to SmatPay with the details (saved or still in the form), shows the
+  merchant's name and approval, and lists its payment profiles to pick from.
+- Anything not saved falls back to the `SMATPAY_*` settings in `.env`, marked *from .env* in the admin site.
+
+| Endpoint | Does |
+| --- | --- |
+| `GET /api/admin/settings/payments` | The settings, with keys shown only as set or not |
+| `PUT /api/admin/settings/payments` | Save: a value sets it, `null` clears it; a key left out or `""` is kept |
+| `POST /api/admin/settings/payments/test` | Check the connection, with optional unsaved values |
+
 ## Request log
 
 Every authenticated `/api/kyc` call is saved in `api_requests`: who called (`client_id`), which check

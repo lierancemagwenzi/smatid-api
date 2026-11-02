@@ -32,24 +32,34 @@ function filters(query, days) {
     return {where: {[Op.and]: conditions}, start, end};
 }
 
+/** The request log, newest first, filtered as `query` says. Shared with the client portal. */
+async function listRequests(query) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const perPage = Math.min(100, Math.max(1, Number(query.per_page) || 25));
+    const {where: conditions} = filters(query);
+    const {rows, count} = await db.api_request.findAndCountAll({
+        where: conditions,
+        include: [{model: db.client, attributes: ['id', 'name']}],
+        order: [['id', 'DESC']],
+        limit: perPage,
+        offset: (page - 1) * perPage,
+    });
+    return {requests: rows.map((r) => usageHelper.listItem(r)), page, per_page: perPage, total: count};
+}
+
+/** One logged request; with `clientId`, only if it's that client's. */
+async function findRequest(id, clientId) {
+    const row = await db.api_request.findByPk(id, {include: [{model: db.client, attributes: ['id', 'name']}]});
+    if (!row || (clientId && row.client_id !== clientId)) return null;
+    return usageHelper.detail(row);
+}
+
+exports.listRequests = listRequests;
+exports.findRequest = findRequest;
+
 exports.List = async (req, res) => {
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const perPage = Math.min(100, Math.max(1, Number(req.query.per_page) || 25));
     try {
-        const {where: conditions} = filters(req.query);
-        const {rows, count} = await db.api_request.findAndCountAll({
-            where: conditions,
-            include: [{model: db.client, attributes: ['id', 'name']}],
-            order: [['id', 'DESC']],
-            limit: perPage,
-            offset: (page - 1) * perPage,
-        });
-        return res.json({
-            requests: rows.map((r) => usageHelper.listItem(r)),
-            page,
-            per_page: perPage,
-            total: count,
-        });
+        return res.json(await listRequests(req.query));
     } catch (err) {
         console.error('Usage list failed:', err.message);
         return res.status(500).json({error: 'usage_list_failed'});
@@ -58,11 +68,9 @@ exports.List = async (req, res) => {
 
 exports.Show = async (req, res) => {
     try {
-        const row = await db.api_request.findByPk(req.params.id, {
-            include: [{model: db.client, attributes: ['id', 'name']}],
-        });
-        if (!row) return res.status(404).json({error: 'request_not_found'});
-        return res.json({request: usageHelper.detail(row)});
+        const request = await findRequest(req.params.id);
+        if (!request) return res.status(404).json({error: 'request_not_found'});
+        return res.json({request});
     } catch (err) {
         console.error('Usage detail failed:', err.message);
         return res.status(500).json({error: 'usage_detail_failed'});
@@ -70,13 +78,12 @@ exports.Show = async (req, res) => {
 };
 
 /** Counts for the dashboard: totals, per check, per day and per client. Defaults to the last 30 days. */
-exports.Stats = async (req, res) => {
-    try {
-        const {where: conditions, start, end} = filters(req.query, 30);
+async function stats(query) {
+        const {where: conditions, start, end} = filters(query, 30);
         const isError = literal('CASE WHEN status >= 400 AND status <> 404 THEN 1 ELSE 0 END');
         const byCheck = await db.api_request.findAll({
             where: conditions,
-            attributes: ['check_type', [fn('COUNT', col('id')), 'requests'], [fn('SUM', isError), 'errors']],
+            attributes: ['check_type', [fn('COUNT', col('id')), 'requests'], [fn('SUM', isError), 'errors'], [fn('SUM', col('credits_charged')), 'credits']],
             group: ['check_type'],
             raw: true,
         });
@@ -102,14 +109,15 @@ exports.Stats = async (req, res) => {
             raw: true,
         });
 
-        const checks = byCheck.map((r) => ({check_type: r.check_type, requests: Number(r.requests), errors: Number(r.errors)}));
+        const checks = byCheck.map((r) => ({check_type: r.check_type, requests: Number(r.requests), errors: Number(r.errors), credits: Number(r.credits || 0)}));
         const clientCounts = Object.fromEntries(clients.map((r) => [r.status, Number(r.count)]));
-        return res.json({
+        return {
             from: start,
             to: end,
             totals: {
                 requests: checks.reduce((n, c) => n + c.requests, 0),
                 errors: checks.reduce((n, c) => n + c.errors, 0),
+                credits: checks.reduce((n, c) => n + c.credits, 0),
                 active_clients: clientCounts.active || 0,
                 revoked_clients: clientCounts.revoked || 0,
             },
@@ -120,7 +128,14 @@ exports.Stats = async (req, res) => {
                 requests: Number(r.requests),
             })),
             by_client: byClient.map((r) => ({client_id: r.client_id, name: r['client.name'], requests: Number(r.requests)})),
-        });
+        };
+}
+
+exports.stats = stats;
+
+exports.Stats = async (req, res) => {
+    try {
+        return res.json(await stats(req.query));
     } catch (err) {
         console.error('Usage stats failed:', err.message);
         return res.status(500).json({error: 'usage_stats_failed'});

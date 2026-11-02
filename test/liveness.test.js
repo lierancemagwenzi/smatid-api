@@ -116,7 +116,7 @@ function sessionsTable(t) {
         },
         findOne: async ({where}) => rows.find((s) => s.public_id === where.public_id && (!where.client_id || s.client_id === where.client_id)) || null,
     });
-    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: where.key, status: 'enabled'})});
+    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: where.key, status: 'enabled', credit_cost: 0})});
     stub(t, db.api_request, {create: async () => {}});
     stub(t, db.client, {findOne: async ({where}) => {
         const id = where.token_hash === tokenHelper.sha256('kyc_other') ? 2 : 1;

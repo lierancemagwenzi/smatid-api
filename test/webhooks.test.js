@@ -177,7 +177,7 @@ test('sessions take app links and webhook URLs, and refuse unsafe ones', async (
     const client = db.client.build({id: 1, name: 'Acme', status: 'active'});
     client.update = async (c) => Object.assign(client, c);
     stub(t, db.client, {findOne: async () => client});
-    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: 'x', status: 'enabled'})});
+    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: 'x', status: 'enabled', credit_cost: 0})});
     const logged = [];
     stub(t, db.api_request, {create: async (r) => logged.push(r)});
     stub(t, db.liveness_session, {create: async (f) => Object.assign(db.liveness_session.build(f), {createdAt: new Date()})});
@@ -209,7 +209,7 @@ test('a client sets its default webhook, and sessions use it unless they give th
     const client = db.client.build({id: 1, name: 'Acme', status: 'active'});
     client.update = async (c) => Object.assign(client, c);
     stub(t, db.client, {findOne: async () => client});
-    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: 'x', status: 'enabled'})});
+    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: 'x', status: 'enabled', credit_cost: 0})});
     stub(t, db.api_request, {create: async () => {}});
     stub(t, db.liveness_session, {create: async (f) => Object.assign(db.liveness_session.build(f), {createdAt: new Date()})});
     const call = await service(t);
