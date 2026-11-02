@@ -139,6 +139,9 @@ test('the endpoint answers 400 for a bad body and 502 while yente is not ready',
     const create = db.api_request.create;
     db.api_request.create = async () => {};
     t.after(() => (db.api_request.create = create));
+    const moduleLookup = db.kyc_module.findOne;
+    db.kyc_module.findOne = async () => db.kyc_module.build({key: 'sanctions-check', name: 'S', status: 'enabled'});
+    t.after(() => (db.kyc_module.findOne = moduleLookup));
 
     const yente = await fakeYente(() => ({status: 503, data: {detail: 'Index not ready'}}));
     const kyc = await kycService();

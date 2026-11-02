@@ -24,6 +24,11 @@ function row(fields) {
     return c;
 }
 
+/** Every module enabled, for tests that aren't about modules. */
+function modulesOn(t) {
+    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: where.key, status: 'enabled'})});
+}
+
 async function service(t) {
     const app = express();
     app.use(express.json());
@@ -62,6 +67,7 @@ test('KYC calls need an active client token', async (t) => {
         },
     });
     stub(t, db.api_request, {create: async () => {}});
+    modulesOn(t);
     const call = await service(t);
 
     assert.deepStrictEqual(await call('GET', '/api/kyc/company/bad%20num'),
@@ -177,6 +183,7 @@ test('each KYC call is logged with its client, search, response and time', async
     let written;
     const done = new Promise((r) => (written = r));
     stub(t, db.api_request, {create: async (fields) => (logged.push(fields), written())});
+    modulesOn(t);
     const call = await service(t);
 
     const res = await call('GET', '/api/kyc/company/bad%20num?ref=abc', {headers: {Authorization: `Bearer ${token}`}});
@@ -199,6 +206,7 @@ test('a call without a valid token is not logged, and a failed log write does no
     stub(t, db.client, {findOne: async () => row({})});
     let attempts = 0;
     stub(t, db.api_request, {create: async () => (attempts++, Promise.reject(new Error('db down')))});
+    modulesOn(t);
     const call = await service(t);
 
     assert.strictEqual((await call('GET', '/api/kyc/company/bad%20num')).status, 401);

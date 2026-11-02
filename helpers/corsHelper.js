@@ -12,7 +12,7 @@ module.exports = {
                 res.set('Access-Control-Allow-Origin', origin);
                 res.vary('Origin');
                 if (req.method === 'OPTIONS') {
-                    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+                    res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
                     res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
                     res.set('Access-Control-Max-Age', '600');
                     return res.sendStatus(204);

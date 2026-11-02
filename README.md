@@ -61,12 +61,29 @@ IP in 15 minutes, sign-in answers `429` for the rest of that window.
 | `POST /api/admin/login`, `POST /api/admin/logout`, `GET /api/admin/me` | Sign in, sign out, who am I |
 | `GET /api/admin/clients`, `POST /api/admin/clients` | List clients (with request counts), create one |
 | `GET /api/admin/clients/:id`, `POST /api/admin/clients/:id/revoke` | One client, revoke its token |
+| `GET /api/admin/modules`, `POST /api/admin/modules`, `PATCH /api/admin/modules/:id` | List, create and edit modules (`name`, `description`, `status`) |
 | `GET /api/admin/requests` | The request log, newest first. Filters: `client_id`, `check_type`, `outcome` (`ok` or `error`), `from` and `to` (`YYYY-MM-DD`, UTC), `q` (searches what was sent), `page`, `per_page` (up to 100) |
 | `GET /api/admin/requests/:id` | One request with its full request and response |
 | `GET /api/admin/stats` | Totals, per check, per day and top 10 clients. Same filters; the last 30 days by default |
 
 `npm run admin:create` adds an admin, or sets a new password for an existing one and signs them out
 everywhere. The admin site is on its own origin, so put its address in `CORS_ORIGINS`.
+
+## Modules
+
+Each check is a module in the `modules` table, which an admin can switch `enabled` or `disabled`. While a
+module is disabled, or missing from the table, its endpoint answers every client with
+`403 {"error": "module_disabled", "module": "<key>"}`. Those calls still go in the request log.
+
+| Module key | Endpoint |
+| --- | --- |
+| `companies-check` | `GET /api/kyc/company/:number` |
+| `sanctions-check` | `POST /api/kyc/sanctions` |
+
+The migration creates both as enabled. An admin can create more, e.g. `liveness-check`, ahead of the code:
+the list shows `connected: false` until an endpoint checks that key with
+`modules.requireModule('liveness-check')` in `routes/kycRoutes.js`. A module's key can't be changed after it's
+created, because the code refers to it.
 
 ## Request log
 
