@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#0b1324" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>Liveness check · Smatid</title>
+  <link rel="stylesheet" href="/liveness/assets/liveness.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="brand">
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="26" height="26"><rect width="32" height="32" rx="8" fill="#1d4ed8"/><path d="M10 16.5l4 4 8-9" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span>Smatid <b>verify</b></span>
+    </header>
+
+    <section id="screen-loading" class="screen center-screen">
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="muted">Loading…</p>
+    </section>
+
+    <!-- Start: the same on every device, plus "continue on your phone" on a computer. -->
+    <section id="screen-intro" class="screen" hidden>
+      <div class="intro-art" aria-hidden="true">
+        <svg viewBox="0 0 120 120" width="112" height="112"><circle cx="60" cy="60" r="56" fill="#e8efff"/><ellipse cx="60" cy="56" rx="24" ry="30" fill="none" stroke="#1d4ed8" stroke-width="4"/><path d="M36 100c4-14 13-20 24-20s20 6 24 20" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linecap="round"/></svg>
+      </div>
+      <h1>Show us it’s really you</h1>
+      <p class="lead"><strong id="client-name">A company</strong> has asked Smatid to check that a real person is taking part. It takes about 20 seconds.</p>
+      <ul class="tips">
+        <li>Find good light, with your face clearly visible.</li>
+        <li>Take off sunglasses, hats or masks.</li>
+        <li>You’ll be asked to look at the camera, turn your head and open your mouth.</li>
+      </ul>
+      <p id="intro-note" class="note" hidden></p>
+
+      <div id="handoff" class="handoff" hidden>
+        <img id="qr" class="qr" alt="QR code for this page" width="148" height="148" />
+        <div>
+          <p class="handoff-title">Best on your phone</p>
+          <p class="small muted">Scan this with your phone’s camera to do the check there. This page will update when you’re done.</p>
+          <button id="copy-link-desktop" class="link-btn" type="button">Copy link instead</button>
+        </div>
+      </div>
+
+      <button id="start" class="btn" type="button">Start</button>
+      <p class="small muted center">Your camera is only used during the check. A few pictures are sent to Smatid to confirm the result.</p>
+    </section>
+
+    <!-- In-app browsers (Facebook, Instagram, …) often block the camera. -->
+    <section id="screen-inapp" class="screen" hidden>
+      <h1>Open this in your browser</h1>
+      <p class="lead">The app you opened this link in may not let us use your camera.</p>
+      <ol class="steps" id="inapp-steps"></ol>
+      <a id="open-chrome" class="btn" hidden>Open in Chrome</a>
+      <button id="copy-link-inapp" class="btn btn-secondary" type="button">Copy link</button>
+      <button id="inapp-continue" class="btn btn-ghost" type="button">Try here anyway</button>
+    </section>
+
+    <section id="screen-camera" class="screen camera-screen" hidden>
+      <div class="viewport">
+        <video id="video" playsinline muted autoplay disablepictureinpicture></video>
+        <div class="oval" id="oval"></div>
+        <div class="arrow" id="arrow" hidden aria-hidden="true"></div>
+        <div class="rotate" id="rotate" hidden>
+          <div aria-hidden="true" class="rotate-icon">⟲</div>
+          <p>Turn your phone upright</p>
+        </div>
+      </div>
+      <ol class="progress" id="progress" aria-label="Steps"></ol>
+      <p class="instruction" id="instruction" aria-live="polite">Getting the camera ready…</p>
+      <p class="hint" id="hint" aria-live="polite">&nbsp;</p>
+      <button id="cancel" class="btn btn-ghost" type="button">Cancel</button>
+    </section>
+
+    <section id="screen-checking" class="screen center-screen" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <h2>Checking…</h2>
+      <p class="muted">This takes a few seconds.</p>
+    </section>
+
+    <!-- Someone is doing the check on another device (e.g. they scanned the QR code). -->
+    <section id="screen-elsewhere" class="screen center-screen" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <h2>Continue on your phone</h2>
+      <p class="muted">The check has started on another device. This page will update when it’s finished.</p>
+    </section>
+
+    <section id="screen-camera-help" class="screen" hidden>
+      <div class="result-icon bad" aria-hidden="true"></div>
+      <h2 id="help-title">We can’t use your camera</h2>
+      <p id="help-text" class="muted"></p>
+      <ol class="steps" id="help-steps"></ol>
+      <button id="help-retry" class="btn" type="button">Try again</button>
+      <button id="copy-link-help" class="btn btn-secondary" type="button">Copy link to use another device</button>
+    </section>
+
+    <section id="screen-result" class="screen center-screen" hidden>
+      <div class="result-icon" id="result-icon" aria-hidden="true"></div>
+      <h2 id="result-title"></h2>
+      <p id="result-text" class="muted"></p>
+      <button id="retry" class="btn" type="button" hidden>Try again</button>
+      <a id="continue" class="btn" hidden>Continue</a>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <canvas id="canvas" hidden></canvas>
+  <canvas id="light" width="32" height="24" hidden></canvas>
+  <script type="module" src="/liveness/assets/liveness.js"></script>
+</body>
+</html>

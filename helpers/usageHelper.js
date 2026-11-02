@@ -4,13 +4,17 @@ module.exports = {
     subject: function (row) {
         const request = row.request || {};
         if (row.check_type === 'company') return (request.params && request.params.number) || null;
+        if (row.check_type === 'liveness') {
+            const response = row.response || {};
+            return (request.body && request.body.reference) || response.reference || (request.params && request.params.sessionId) || response.session_id || null;
+        }
         const body = request.body || {};
         if (body.name) return String(body.name);
         const parts = [body.first_name, body.middle_name, body.last_name].filter(Boolean);
         return parts.length ? parts.join(' ') : null;
     },
 
-    /** outcome is one of found, not_found, clear, hit, sanctioned, pep, error; label is for people. */
+    /** outcome is one of found, not_found, clear, hit, sanctioned, pep, passed, failed, pending, expired, error. */
     result: function (row) {
         const r = row.response || {};
         if (row.status >= 400 && !(row.check_type === 'company' && row.status === 404)) {
@@ -19,6 +23,14 @@ module.exports = {
         if (row.check_type === 'company') {
             if (row.status === 404 || r.found === false) return {outcome: 'not_found', label: 'Not on the register'};
             return {outcome: 'found', label: [r.name, r.status].filter(Boolean).join(' · ')};
+        }
+        if (row.check_type === 'liveness') {
+            const status = r.status;
+            if (status === 'passed') return {outcome: 'passed', label: 'Live person confirmed'};
+            if (status === 'failed') return {outcome: 'failed', label: `Failed: ${r.failure_reason || 'no attempts left'}`};
+            if (status === 'expired') return {outcome: 'expired', label: 'Link expired'};
+            if (row.status === 201) return {outcome: 'pending', label: 'Session opened'};
+            return {outcome: 'pending', label: r.attempts ? `In progress (${r.attempts} ${r.attempts === 1 ? 'try' : 'tries'} so far)` : 'Not taken yet'};
         }
         if (row.check_type === 'sanctions') {
             if (!r.hit) return {outcome: 'clear', label: 'No match'};
@@ -47,8 +59,11 @@ module.exports = {
     },
 
     detail: function (row) {
+        const response = row.response || {};
         return {
             ...this.listItem(row),
+            // Liveness rows link to their session, whose frames the admin can look at.
+            liveness_session_id: row.check_type === 'liveness' ? response.session_id || null : null,
             method: row.method,
             path: row.path,
             ip: row.ip,

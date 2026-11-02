@@ -9,7 +9,7 @@ KYC checks for Smatid as a small Express service, laid out like `smatpay_whatsap
 | National ID extraction | | planned |
 | Passport extraction | | planned |
 | Photo identification | | planned |
-| Liveness | | planned |
+| Liveness (hosted page) | `POST /api/kyc/liveness` | done |
 | Sanctions and PEPs (OpenSanctions) | `POST /api/kyc/sanctions` | done |
 
 ## Setup
@@ -60,7 +60,7 @@ IP in 15 minutes, sign-in answers `429` for the rest of that window.
 | --- | --- |
 | `POST /api/admin/login`, `POST /api/admin/logout`, `GET /api/admin/me` | Sign in, sign out, who am I |
 | `GET /api/admin/clients`, `POST /api/admin/clients` | List clients (with request counts), create one |
-| `GET /api/admin/clients/:id`, `POST /api/admin/clients/:id/revoke` | One client, revoke its token |
+| `GET /api/admin/clients/:id`, `PATCH /api/admin/clients/:id`, `POST /api/admin/clients/:id/revoke` | One client, change its default `webhook_url`, revoke its token |
 | `GET /api/admin/modules`, `POST /api/admin/modules`, `PATCH /api/admin/modules/:id` | List, create and edit modules (`name`, `description`, `status`) |
 | `GET /api/admin/requests` | The request log, newest first. Filters: `client_id`, `check_type`, `outcome` (`ok` or `error`), `from` and `to` (`YYYY-MM-DD`, UTC), `q` (searches what was sent), `page`, `per_page` (up to 100) |
 | `GET /api/admin/requests/:id` | One request with its full request and response |
@@ -79,11 +79,125 @@ module is disabled, or missing from the table, its endpoint answers every client
 | --- | --- |
 | `companies-check` | `GET /api/kyc/company/:number` |
 | `sanctions-check` | `POST /api/kyc/sanctions` |
+| `liveness-check` | `POST /api/kyc/liveness`, `GET /api/kyc/liveness/:id` and the hosted page |
 
 The migration creates both as enabled. An admin can create more, e.g. `liveness-check`, ahead of the code:
 the list shows `connected: false` until an endpoint checks that key with
 `modules.requireModule('liveness-check')` in `routes/kycRoutes.js`. A module's key can't be changed after it's
 created, because the code refers to it.
+
+## Liveness
+
+A hosted page on this service checks that a real person is in front of the camera. It's built here, with
+no outside provider, so it costs nothing per check, but it's proof-of-concept strength: it stops printed
+photos, still pictures and a photo held up to the camera, not a skilled attacker with prepared video.
+
+```bash
+# 1. Open a session for the person. Both fields are optional.
+curl -X POST localhost:8011/api/kyc/liveness -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"reference": "cust-42", "redirect_url": "https://acme.co.zw/kyc/done"}'
+# → 201 {"session_id": "lv_...", "url": "https://dev-api.smatid.com/liveness/lv_...", "status": "pending", ...}
+
+# 2. Send the person to `url` (link, SMS, QR code). On a phone is best.
+# 3. They come back to redirect_url?session_id=lv_...&status=passed|failed|expired. Then get the result:
+curl localhost:8011/api/kyc/liveness/lv_... -H "Authorization: Bearer $TOKEN"
+```
+
+Don't trust the `status` in the redirect: anyone can type it. Always get the result from the API.
+
+### Getting the result back
+
+| Way | How | Use it for |
+| --- | --- | --- |
+| **Webhook** | Set a default with `PUT /api/kyc/webhook` (or an admin sets it on the client's page), or give `webhook_url` when opening a session, which wins. When the session ends (`passed`, `failed` or `expired`), the result is POSTed there, signed. | Your server learning the result without waiting or asking |
+| **Ask** | `GET /api/kyc/liveness/:session_id` | The source of truth, any time |
+| **Redirect** | `redirect_url` gets `?session_id=…&status=…` added. It can be a website (https) or a mobile app link such as `acmebank://kyc/done`, which reopens your app. | Taking the person back to where they came from |
+| **Popup** | If your site opened the page with `window.open`, it gets `postMessage({type: 'smatid.liveness', session_id, status})`. | Desktop web flows |
+| **Picture** | `GET /api/kyc/liveness/:session_id/image`: the straight-on frame (JPEG) from the latest try. | Comparing with an ID document's photo |
+
+The redirect, popup message and webhook all tell you *that* it finished. Read the result from the API
+(or from a webhook whose signature checks out) before acting on it.
+
+**Webhooks.** The body is `{"id": "evt_…", "event": "liveness.completed", "created_at": "…", "data": {…}}`,
+where `data` is the same as `GET /api/kyc/liveness/:session_id`. Any 2xx reply counts as received.
+Otherwise it's sent again after 30 seconds, 5 minutes and 30 minutes; redirects aren't followed. Its
+progress shows in the session's `webhook` field. Webhook URLs must be public https: addresses on this
+machine or private networks are refused, including when the name only resolves to one at sending time.
+For local testing, `WEBHOOK_ALLOW_PRIVATE=true` allows `http://localhost`.
+
+Setting the default webhook (it applies to sessions opened from then on; each session keeps the URL it started with):
+
+```bash
+curl -X PUT localhost:8011/api/kyc/webhook -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"webhook_url": "https://acme.co.zw/hooks/smatid"}'      # null or "" removes it
+curl localhost:8011/api/kyc/webhook -H "Authorization: Bearer $TOKEN"
+```
+
+Admins: `PATCH /api/admin/clients/:id` with `{"webhook_url": ...}`, or the Webhook box on the client's page.
+
+Each webhook carries `Smatid-Signature: t=<unix time>,v1=<hex>`, an HMAC-SHA256 of `<t>.<raw body>` with
+the client's signing secret. Get it, or replace it, with your token:
+
+```bash
+curl localhost:8011/api/kyc/webhook-secret -H "Authorization: Bearer $TOKEN"              # {"webhook_secret": "whsec_..."}
+curl -X POST localhost:8011/api/kyc/webhook-secret/rotate -H "Authorization: Bearer $TOKEN"
+```
+
+Checking it, in Node (use the raw body, before any JSON parsing):
+
+```js
+const crypto = require('crypto');
+function isFromSmatid(rawBody, header, secret) {
+    const {t, v1} = Object.fromEntries(header.split(',').map((p) => p.split('=')));
+    if (Math.abs(Date.now() / 1000 - Number(t)) > 300) return false; // older than 5 minutes
+    const expected = crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex');
+    return v1.length === expected.length && crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected));
+}
+```
+
+### The page on different devices
+
+- **Computer:** shows a QR code to carry on with a phone, and keeps following the session, so it shows the
+  result (and redirects) when the phone finishes. The computer's own camera can still be used.
+- **In-app browsers** (Facebook, Instagram, LinkedIn, TikTok and similar), which often can't use the
+  camera: asks to open the link in the phone's browser, with a copy-link button and, on Android, a link
+  straight into Chrome.
+- **Camera blocked:** step-by-step help for iPhone Safari, Android Chrome, Samsung Internet, desktop Chrome
+  and Edge, Firefox and Safari. Camera access is asked for before a try starts, so a blocked camera doesn't
+  use one up.
+- **During the check:** says when it's too dark or too bright, when the face is off-centre, too close or too
+  far, or when the phone is on its side, and gives a tip if a step takes a while. It keeps the screen on,
+  vibrates as each step is done, and pauses if the person switches apps, then carries on at the same step.
+- **Older devices:** falls back from WebGL to WebAssembly, and from the front camera to any camera.
+
+| `status` | Meaning |
+| --- | --- |
+| `pending` | Not taken yet, or a try failed and they can try again (`attempts` says how many so far) |
+| `started` | On the camera screen now |
+| `passed` | A live person was confirmed |
+| `failed` | Every try (`LIVENESS_MAX_ATTEMPTS`, 3) failed; `failure_reason` says why the last one did |
+| `expired` | Not finished within `LIVENESS_SESSION_MINUTES` (30) |
+
+**How it works.** The page only renders for a real session, from a client that's still active, while the
+`liveness-check` module is on. The session ID in the link is the key, so the client's own token never goes
+near the person. When they press Start, the server picks the steps: look straight ahead, then turn left,
+turn right and open your mouth, in a random order. The page shows the live camera, tracks the face in the
+browser (Human, on WebGL), and takes one picture when each step is held. The server then runs the face
+models again on those pictures (Human on WebAssembly, in `helpers/liveness/`) and decides:
+
+- one face per picture, close enough, and each step actually done, in the asked-for order;
+- the same person in every picture (face descriptors);
+- the anti-spoof model's average score is high enough;
+- no two pictures identical, and a believable time taken.
+
+The page's own result isn't trusted. Limits are in `livenessHelper.thresholds()` and can be set through
+`LIVENESS_*` settings; they're starting points, to be tuned with real people and phones. Pictures are kept
+in `storage/liveness/<session>/` and admins can see them next to each liveness call in Usage. They're
+biometric data: decide how long to keep them.
+
+Expired sessions are marked every 30 seconds, which also sends their webhook.
+
+The face models need about 300 MB of memory once loaded, the first time a check is taken after a restart.
 
 ## Request log
 

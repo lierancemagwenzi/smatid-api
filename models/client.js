@@ -14,6 +14,7 @@ module.exports = (sequelize, DataTypes) => {
                 status: this.status,
                 last_used_at: this.last_used_at,
                 revoked_at: this.revoked_at,
+                webhook_url: this.webhook_url || null,
                 // underscored only renames the column; the attribute is still createdAt.
                 created_at: this.createdAt,
             };
@@ -28,6 +29,9 @@ module.exports = (sequelize, DataTypes) => {
         status: {type: DataTypes.STRING, allowNull: false, defaultValue: 'active'},
         last_used_at: DataTypes.DATE,
         revoked_at: DataTypes.DATE,
+        // Not in toPublic(): only the client itself gets it, from GET /api/kyc/webhook-secret.
+        webhook_secret: DataTypes.STRING(80),
+        webhook_url: DataTypes.STRING(2048),
     }, {
         sequelize,
         modelName: 'client',

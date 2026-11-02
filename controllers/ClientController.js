@@ -1,4 +1,5 @@
 const tokenHelper = require('../helpers/tokenHelper');
+const webhookHelper = require('../helpers/webhookHelper');
 const mailHelper = require('../helpers/mailHelper');
 const db = require('../models');
 
@@ -63,6 +64,32 @@ exports.Show = async (req, res) => {
     } catch (err) {
         console.error('Client show failed:', err.message);
         return res.status(500).json({error: 'client_show_failed'});
+    }
+};
+
+/** Changes a client's settings. For now: webhook_url, the default webhook (null or "" clears it). */
+exports.Update = async (req, res) => {
+    const body = req.body || {};
+    const changes = {};
+    if (body.webhook_url !== undefined) {
+        const url = body.webhook_url === null ? '' : String(body.webhook_url).trim();
+        if (url) {
+            const problem = webhookHelper.urlProblem(url);
+            if (problem) return res.status(400).json({error: problem});
+        }
+        changes.webhook_url = url || null;
+    }
+    if (!Object.keys(changes).length) return res.status(400).json({error: 'nothing_to_update'});
+    try {
+        const client = await db.client.findByPk(req.params.id);
+        if (!client) return res.status(404).json({error: 'client_not_found'});
+        await client.update(changes);
+        if (changes.webhook_url && !client.webhook_secret) await client.update({webhook_secret: webhookHelper.newSecret()});
+        const usage = await usageByClient([client.id]);
+        return res.json({client: {...client.toPublic(), ...(usage.get(client.id) || NO_USAGE)}});
+    } catch (err) {
+        console.error('Client update failed:', err.message);
+        return res.status(500).json({error: 'client_update_failed'});
     }
 };
 

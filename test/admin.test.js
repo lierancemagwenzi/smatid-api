@@ -144,3 +144,16 @@ test('usage rows say what was searched for and how it came out', () => {
         {outcome: 'sanctioned', label: 'Sanctioned: Vladimir Putin (100%)'});
     assert.strictEqual(usageHelper.result(sanctions(200, {hit: true, pep: true, matches: [{name: 'X', score: 0.9}]})).outcome, 'pep');
 });
+
+test('liveness rows say whose check it was and how it ended', () => {
+    const row = (status, response, request = {body: {reference: 'cust-42'}}) => ({check_type: 'liveness', status, request, response});
+    assert.strictEqual(usageHelper.subject(row(201, {session_id: 'lv_x'})), 'cust-42');
+    assert.strictEqual(usageHelper.subject(row(200, {session_id: 'lv_x'}, {params: {sessionId: 'lv_x'}})), 'lv_x');
+    assert.strictEqual(usageHelper.result(row(201, {status: 'pending'})).label, 'Session opened');
+    assert.strictEqual(usageHelper.result(row(200, {status: 'passed'})).outcome, 'passed');
+    assert.deepStrictEqual(usageHelper.result(row(200, {status: 'failed', failure_reason: 'spoof_suspected'})),
+        {outcome: 'failed', label: 'Failed: spoof_suspected'});
+    assert.strictEqual(usageHelper.result(row(200, {status: 'expired'})).outcome, 'expired');
+    assert.strictEqual(usageHelper.result(row(403, {error: 'module_disabled'})).outcome, 'error');
+    assert.strictEqual(usageHelper.detail(row(200, {session_id: 'lv_x', status: 'passed'})).liveness_session_id, 'lv_x');
+});
