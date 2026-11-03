@@ -106,6 +106,39 @@ module.exports = {
         return credited;
     },
 
+    /**
+     * Records a top-up an admin was paid for outside Smatpay (cash, bank transfer) and credits it at once.
+     * The amount defaults to the list price; 0 is allowed for free credits that should still show as a top-up.
+     */
+    recordManual: async function ({clientId, credits, amount, reference, note, adminId}) {
+        credits = Number(credits);
+        if (!Number.isInteger(credits) || credits < 1 || credits > 1000000) throw new TopupError('invalid_credits');
+        amount = amount === undefined || amount === null || amount === '' ? billing.priceOf(credits) : Number(amount);
+        if (!Number.isFinite(amount) || amount < 0 || amount > 1e9) throw new TopupError('invalid_amount');
+        amount = Math.round(amount * 100) / 100;
+        reference = String(reference || '').trim();
+        note = String(note || '').trim();
+        if (reference.length > 128) throw new TopupError('reference_too_long');
+        if (note.length > 150) throw new TopupError('note_too_long');
+
+        return db.sequelize.transaction(async (transaction) => {
+            const client = await db.client.findByPk(clientId, {transaction});
+            if (!client) throw new TopupError('client_not_found');
+            const currency = billing.config().currency;
+            const topup = await db.topup.create({
+                client_id: client.id,
+                reference: `SMID-${client.id}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`,
+                credits, amount, currency, method: 'MANUAL', status: 'paid', paid_at: new Date(),
+                provider_status: 'Manual', payment_reference: reference || null,
+            }, {transaction});
+            const {client: updated} = await billing.adjust(client.id, {
+                credits, kind: 'topup', topupId: topup.id, adminId,
+                description: `Manual top-up: ${credits} credits (${currency} ${amount.toFixed(2)})${note ? `, ${note}` : ''}`,
+            }, {transaction});
+            return {topup, client: updated};
+        });
+    },
+
     /** Asks Smatpay where a pending top-up stands, and settles it if it's finished. */
     refresh: async function (topup) {
         if (topup.status !== 'pending') return topup;

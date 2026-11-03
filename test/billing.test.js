@@ -121,3 +121,47 @@ test('a completed check is charged its module cost; a refused one is refunded; n
     assert.strictEqual(refused.status, 402);
     assert.deepStrictEqual(await refused.json(), {error: 'insufficient_credits', credits_needed: cost, available_credits: 0});
 });
+
+test('a manual top-up is recorded as paid, credited at once, and counted apart from usage', async (t) => {
+    const made = await throwawayClient(t, {credits: 5});
+    if (!made) return;
+    const {client} = made;
+    const topupHelper = require('../helpers/billing/topupHelper');
+    t.after(() => db.topup.destroy({where: {client_id: client.id}}));
+
+    const {topup, client: after} = await topupHelper.recordManual({clientId: client.id, credits: 200, reference: 'BANK-991', note: 'Bank transfer'});
+    assert.deepStrictEqual([topup.status, topup.method, topup.credits, Number(topup.amount)], ['paid', 'MANUAL', 200, billing.priceOf(200)]);
+    assert.strictEqual(after.credits, 205);
+    const free = await topupHelper.recordManual({clientId: client.id, credits: 10, amount: 0});
+    assert.strictEqual(Number(free.topup.amount), 0);
+    await assert.rejects(topupHelper.recordManual({clientId: 999999999, credits: 10}), (err) => err.code === 'client_not_found');
+
+    const r = await billing.reserve(client.id, 4, 'sanctions');
+    await billing.reserve(client.id, 2, 'company');
+    await billing.refund(client.id, r, 'sanctions');
+    await billing.reserve(client.id, 3, 'sanctions');
+    assert.deepStrictEqual((await ledger(client)).slice(0, 2), [['topup', 200, 0], ['topup', 10, 0]]);
+
+    const call = await adminService(t);
+    const res = await call('GET', `/api/admin/clients/${client.id}/credit-usage`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual([res.body.recent.credits_used, res.body.recent.checks, res.body.all_time.credits_used], [5, 2, 5]);
+    assert.deepStrictEqual(res.body.recent.by_check.map((c) => [c.check_type, c.credits_used, c.checks]), [['sanctions', 3, 1], ['company', 2, 1]]);
+});
+
+/** The admin API on a random port, signed in with X-Admin-Key. */
+async function adminService(t) {
+    process.env.ADMIN_API_KEY = 'admin-secret';
+    t.after(() => delete process.env.ADMIN_API_KEY);
+    const app = express();
+    app.use(express.json());
+    require('../routes/kycRoutes')(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    t.after(() => server.close());
+    const base = `http://127.0.0.1:${server.address().port}`;
+    return async (method, path, body) => {
+        const res = await fetch(base + path, {method, headers: {'Content-Type': 'application/json', 'X-Admin-Key': 'admin-secret'}, body: body && JSON.stringify(body)});
+        return {status: res.status, body: await res.json()};
+    };
+}

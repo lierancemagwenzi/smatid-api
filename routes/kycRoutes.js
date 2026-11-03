@@ -72,9 +72,15 @@ module.exports = function (app) {
     app.route('/api/admin/clients/:id/transactions')
         .get(auth.requireAdmin, clients.Transactions);
     app.route('/api/admin/clients/:id/users')
-        .get(auth.requireAdmin, clients.Users);
+        .get(auth.requireAdmin, clients.Users)
+        .post(auth.requireAdmin, clients.AddUser);
+    app.route('/api/admin/clients/:id/users/:userId')
+        .delete(auth.requireAdmin, clients.RemoveUser);
     app.route('/api/admin/clients/:id/topups')
-        .get(auth.requireAdmin, clients.Topups);
+        .get(auth.requireAdmin, clients.Topups)
+        .post(auth.requireAdmin, clients.ManualTopup);
+    app.route('/api/admin/clients/:id/credit-usage')
+        .get(auth.requireAdmin, clients.CreditUsage);
     app.route('/api/admin/topups')
         .get(auth.requireAdmin, clients.Topups);
 

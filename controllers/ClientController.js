@@ -2,6 +2,7 @@ const tokenHelper = require('../helpers/tokenHelper');
 const webhookHelper = require('../helpers/webhookHelper');
 const mailHelper = require('../helpers/mailHelper');
 const billing = require('../helpers/billing/billingHelper');
+const topupHelper = require('../helpers/billing/topupHelper');
 const portalAuth = require('../helpers/portalAuthHelper');
 const db = require('../models');
 
@@ -178,6 +179,104 @@ exports.Users = async (req, res) => {
     }
 };
 
+/** Adds a portal user to an existing client. Like a portal invite: they set their own password from the email. */
+exports.AddUser = async (req, res) => {
+    const body = req.body || {};
+    const name = String(body.name || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
+    const role = body.role === 'owner' ? 'owner' : 'member';
+    if (!name || name.length > 255) return res.status(400).json({error: 'name_required'});
+    if (!EMAIL_PATTERN.test(email)) return res.status(400).json({error: 'valid_email_required'});
+    try {
+        const client = await db.client.findByPk(req.params.id);
+        if (!client) return res.status(404).json({error: 'client_not_found'});
+        // A person has one portal account, so the email can't already be someone's sign-in.
+        if (await db.user.findOne({where: {email}})) return res.status(409).json({error: 'email_taken'});
+        const user = await db.user.create({client_id: client.id, name, email, role});
+        // req.admin is null when signed in with X-Admin-Key; the email then names no one.
+        const sent = await mailHelper.sendInvite(user, req.admin, client, await portalAuth.issueLinkToken(user, 'invite'));
+        return res.status(201).json({user: user.toPublic(), email_sent: sent});
+    } catch (err) {
+        console.error('Client add user failed:', err.message);
+        return res.status(500).json({error: 'add_user_failed'});
+    }
+};
+
+/** Removes a portal user from a client, never its last active owner. Their sessions and links go with them. */
+exports.RemoveUser = async (req, res) => {
+    try {
+        const user = await db.user.findOne({where: {id: req.params.userId, client_id: req.params.id}});
+        if (!user) return res.status(404).json({error: 'user_not_found'});
+        if (user.isOwner()) {
+            const owners = await db.user.count({where: {client_id: user.client_id, role: 'owner', status: 'active'}});
+            if (owners <= 1) return res.status(400).json({error: 'last_owner'});
+        }
+        await user.destroy();
+        return res.json({removed: true});
+    } catch (err) {
+        console.error('Client remove user failed:', err.message);
+        return res.status(500).json({error: 'remove_user_failed'});
+    }
+};
+
+/** Credits a client for a payment taken outside Smatpay. Emails the client a receipt unless send_receipt is false. */
+exports.ManualTopup = async (req, res) => {
+    const body = req.body || {};
+    try {
+        const {topup, client} = await topupHelper.recordManual({
+            clientId: req.params.id, credits: body.credits, amount: body.amount,
+            reference: body.reference, note: body.note, adminId: req.admin ? req.admin.id : null,
+        });
+        const emailSent = body.send_receipt === false ? false : await mailHelper.sendTopupReceipt(null, client, topup);
+        const usage = await usageByClient([client.id]);
+        return res.status(201).json({topup: topup.toPublic(), client: {...client.toPublic(), ...(usage.get(client.id) || NO_USAGE)}, email_sent: emailSent});
+    } catch (err) {
+        if (err instanceof topupHelper.TopupError) return res.status(err.code === 'client_not_found' ? 404 : 400).json({error: err.code});
+        console.error('Manual top-up failed:', err.message);
+        return res.status(500).json({error: 'topup_failed'});
+    }
+};
+
+/**
+ * Credits a client has spent on checks (usage less refunds), split by check and by paid or trial credits:
+ * over the last `days` days (default 30) and all time.
+ */
+exports.CreditUsage = async (req, res) => {
+    const days = Math.min(366, Math.max(1, Number(req.query.days) || 30));
+    const {fn, col, Op} = db.Sequelize;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const summarise = async (where) => {
+        const rows = await db.credit_transaction.findAll({
+            where: {client_id: req.params.id, kind: {[Op.in]: ['usage', 'refund']}, ...where},
+            attributes: ['check_type', 'kind', [fn('SUM', col('credits')), 'credits'], [fn('SUM', col('trial_credits')), 'trial_credits'], [fn('COUNT', col('id')), 'count']],
+            group: ['check_type', 'kind'],
+            raw: true,
+        });
+        const byCheck = new Map();
+        for (const r of rows) {
+            const c = byCheck.get(r.check_type) || {check_type: r.check_type, checks: 0, paid_credits: 0, trial_credits: 0};
+            // Usage rows are negative and refunds positive, so the sum's negation is what was spent.
+            c.paid_credits -= Number(r.credits);
+            c.trial_credits -= Number(r.trial_credits);
+            c.checks += r.kind === 'usage' ? Number(r.count) : -Number(r.count);
+            byCheck.set(r.check_type, c);
+        }
+        const checks = [...byCheck.values()].map((c) => ({...c, credits_used: c.paid_credits + c.trial_credits}))
+            .sort((a, b) => b.credits_used - a.credits_used);
+        const total = (k) => checks.reduce((n, c) => n + c[k], 0);
+        return {credits_used: total('credits_used'), paid_credits: total('paid_credits'), trial_credits: total('trial_credits'), checks: total('checks'), by_check: checks};
+    };
+    try {
+        const client = await db.client.findByPk(req.params.id);
+        if (!client) return res.status(404).json({error: 'client_not_found'});
+        const [recent, allTime] = await Promise.all([summarise({created_at: {[Op.gte]: since}}), summarise({})]);
+        return res.json({days, recent, all_time: allTime});
+    } catch (err) {
+        console.error('Credit usage failed:', err.message);
+        return res.status(500).json({error: 'credit_usage_failed'});
+    }
+};
+
 /** Top-ups: one client's (with :id), or everyone's. */
 exports.Topups = async (req, res) => {
     const page = Math.max(1, Number(req.query.page) || 1);
@@ -190,7 +289,7 @@ exports.Topups = async (req, res) => {
             where, include: [{model: db.client, attributes: ['id', 'name']}], order: [['id', 'DESC']], limit: perPage, offset: (page - 1) * perPage,
         });
         return res.json({
-            topups: rows.map((t) => ({...t.toPublic(), client_id: t.client_id, client_name: t.client ? t.client.name : null, provider_status: t.provider_status})),
+            topups: rows.map((t) => ({...t.toPublic(), client_id: t.client_id, client_name: t.client ? t.client.name : null, provider_status: t.provider_status, payment_reference: t.payment_reference})),
             page, per_page: perPage, total: count,
         });
     } catch (err) {

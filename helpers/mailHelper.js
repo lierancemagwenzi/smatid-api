@@ -144,7 +144,7 @@ module.exports = {
     sendInvite: function (user, inviter, client, token) {
         return this.send(user.email, `You’ve been invited to ${client.name} on Smatid KYC`, {
             title: `Join ${client.name} on Smatid KYC`,
-            paragraphs: [`Hello ${user.name}, ${inviter.name} has invited you to ${client.name}’s Smatid KYC account, where you can see its checks, credits and usage.`],
+            paragraphs: [`Hello ${user.name}, ${inviter ? inviter.name : 'the Smatid KYC team'} has invited you to ${client.name}’s Smatid KYC account, where you can see its checks, credits and usage.`],
             button: {label: 'Accept and set a password', url: `${portalUrl()}/accept-invite?token=${encodeURIComponent(token)}`},
             footnote: 'This invitation works for 7 days.',
         }, `Invite for user ${user.id}`);

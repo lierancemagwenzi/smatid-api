@@ -189,6 +189,73 @@ test('the admin can name the contact, and an email that already has a portal acc
         {status: 409, body: {error: 'email_taken'}});
 });
 
+test('the admin can add a portal user to an existing client, who gets an invite', async (t) => {
+    const sent = [];
+    const admin = adminWithMail(t, async (msg) => (sent.push(msg), [{statusCode: 202}]));
+    stub(t, db.client, {findByPk: async (id) => (String(id) === '1' ? row({}) : null)});
+    const users = usersTable(t, [db.user.build({id: 99, email: 'taken@acme.co.zw', name: 'X', client_id: 5})]);
+    const call = await service(t);
+
+    assert.deepStrictEqual(await call('POST', '/api/admin/clients/1/users', {headers: admin, body: {email: 'a@acme.co.zw'}}),
+        {status: 400, body: {error: 'name_required'}});
+    assert.deepStrictEqual(await call('POST', '/api/admin/clients/1/users', {headers: admin, body: {name: 'A', email: 'nope'}}),
+        {status: 400, body: {error: 'valid_email_required'}});
+    assert.deepStrictEqual(await call('POST', '/api/admin/clients/9/users', {headers: admin, body: {name: 'A', email: 'a@acme.co.zw'}}),
+        {status: 404, body: {error: 'client_not_found'}});
+    assert.deepStrictEqual(await call('POST', '/api/admin/clients/1/users', {headers: admin, body: {name: 'A', email: 'Taken@Acme.co.zw'}}),
+        {status: 409, body: {error: 'email_taken'}});
+    assert.strictEqual(sent.length, 0);
+
+    const res = await call('POST', '/api/admin/clients/1/users', {headers: admin, body: {name: ' Rudo ', email: 'Rudo@Acme.co.zw', role: 'owner'}});
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.email_sent, true);
+    assert.strictEqual(res.body.user.invited, true);
+    assert.deepStrictEqual([users[0].client_id, users[0].name, users[0].email, users[0].role], [1, 'Rudo', 'rudo@acme.co.zw', 'owner']);
+    assert.strictEqual(sent[0].to, 'rudo@acme.co.zw');
+    assert.ok(sent[0].html.includes('/accept-invite?token=setup-token-123'));
+    assert.ok(sent[0].text.includes('the Smatid KYC team has invited you'), 'no admin name with X-Admin-Key');
+
+    const member = await call('POST', '/api/admin/clients/1/users', {headers: admin, body: {name: 'Farai', email: 'farai@acme.co.zw', role: 'admin'}});
+    assert.strictEqual(member.body.user.role, 'member', 'anything but owner is a member');
+});
+
+test('the admin can remove a client’s portal user, but not its last owner', async (t) => {
+    const admin = adminWithMail(t, async () => [{statusCode: 202}]);
+    const people = [
+        db.user.build({id: 1, client_id: 1, name: 'Owner', email: 'o@acme.co.zw', role: 'owner', status: 'active'}),
+        db.user.build({id: 2, client_id: 1, name: 'Member', email: 'm@acme.co.zw', role: 'member', status: 'active'}),
+        db.user.build({id: 3, client_id: 2, name: 'Other', email: 'x@other.co.zw', role: 'member', status: 'active'}),
+    ];
+    const destroyed = [];
+    for (const p of people) p.destroy = async () => destroyed.push(p.id);
+    stub(t, db.user, {
+        findOne: async ({where}) => people.find((p) => String(p.id) === String(where.id) && String(p.client_id) === String(where.client_id)) || null,
+        count: async ({where}) => people.filter((p) => p.client_id === where.client_id && p.role === where.role && p.status === where.status).length,
+    });
+    const call = await service(t);
+
+    assert.deepStrictEqual(await call('DELETE', '/api/admin/clients/1/users/3', {headers: admin}),
+        {status: 404, body: {error: 'user_not_found'}}, 'only the client’s own users');
+    assert.deepStrictEqual(await call('DELETE', '/api/admin/clients/1/users/1', {headers: admin}),
+        {status: 400, body: {error: 'last_owner'}});
+    assert.deepStrictEqual(await call('DELETE', '/api/admin/clients/1/users/2', {headers: admin}),
+        {status: 200, body: {removed: true}});
+    assert.deepStrictEqual(destroyed, [2]);
+});
+
+test('a manual top-up checks its input before touching the client', async (t) => {
+    const admin = adminWithMail(t, async () => [{statusCode: 202}]);
+    const call = await service(t);
+    const topup = (body) => call('POST', '/api/admin/clients/1/topups', {headers: admin, body});
+
+    assert.deepStrictEqual(await topup({}), {status: 400, body: {error: 'invalid_credits'}});
+    assert.deepStrictEqual(await topup({credits: 1.5}), {status: 400, body: {error: 'invalid_credits'}});
+    assert.deepStrictEqual(await topup({credits: -10}), {status: 400, body: {error: 'invalid_credits'}});
+    assert.deepStrictEqual(await topup({credits: 10, amount: -1}), {status: 400, body: {error: 'invalid_amount'}});
+    assert.deepStrictEqual(await topup({credits: 10, amount: 'ten'}), {status: 400, body: {error: 'invalid_amount'}});
+    assert.deepStrictEqual(await topup({credits: 10, note: 'x'.repeat(151)}), {status: 400, body: {error: 'note_too_long'}});
+});
+
 test('a failed email still creates the client and hands the admin the token', async (t) => {
     const admin = adminWithMail(t, async () => {
         throw Object.assign(new Error('Forbidden'), {response: {body: {errors: [{message: 'sender not verified'}]}}});
