@@ -76,6 +76,8 @@ module.exports = function (app) {
         .post(auth.requireAdmin, clients.AddUser);
     app.route('/api/admin/clients/:id/users/:userId')
         .delete(auth.requireAdmin, clients.RemoveUser);
+    app.route('/api/admin/clients/:id/users/:userId/resend-invite')
+        .post(auth.requireAdmin, clients.ResendInvite);
     app.route('/api/admin/clients/:id/topups')
         .get(auth.requireAdmin, clients.Topups)
         .post(auth.requireAdmin, clients.ManualTopup);

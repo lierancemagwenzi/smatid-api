@@ -202,6 +202,24 @@ exports.AddUser = async (req, res) => {
     }
 };
 
+/**
+ * Emails a fresh invite link to a user who hasn't set a password yet; the old link stops working.
+ * Someone who has a password uses "Forgot password" instead.
+ */
+exports.ResendInvite = async (req, res) => {
+    try {
+        const user = await db.user.findOne({where: {id: req.params.userId, client_id: req.params.id}, include: [{model: db.client}]});
+        if (!user) return res.status(404).json({error: 'user_not_found'});
+        if (user.password_hash) return res.status(400).json({error: 'already_set_up'});
+        if (user.status !== 'active') return res.status(400).json({error: 'user_not_active'});
+        const sent = await mailHelper.sendInvite(user, req.admin, user.client, await portalAuth.issueLinkToken(user, 'invite'));
+        return res.json({user: user.toPublic(), email_sent: sent});
+    } catch (err) {
+        console.error('Resend invite failed:', err.message);
+        return res.status(500).json({error: 'resend_failed'});
+    }
+};
+
 /** Removes a portal user from a client, never its last active owner. Their sessions and links go with them. */
 exports.RemoveUser = async (req, res) => {
     try {

@@ -243,6 +243,35 @@ test('the admin can remove a client’s portal user, but not its last owner', as
     assert.deepStrictEqual(destroyed, [2]);
 });
 
+test('the admin can resend an invite, only to a user who hasn’t set a password yet', async (t) => {
+    const sent = [];
+    const admin = adminWithMail(t, async (msg) => (sent.push(msg), [{statusCode: 202}]));
+    const acme = row({id: 1, name: 'Acme'});
+    const people = [
+        db.user.build({id: 1, client_id: 1, name: 'Invited', email: 'i@acme.co.zw', role: 'member', status: 'active'}),
+        db.user.build({id: 2, client_id: 1, name: 'Set up', email: 's@acme.co.zw', role: 'member', status: 'active', password_hash: 'scrypt$x$y'}),
+        db.user.build({id: 3, client_id: 2, name: 'Other', email: 'x@other.co.zw', role: 'member', status: 'active'}),
+    ];
+    for (const p of people) p.client = acme;
+    stub(t, db.user, {
+        findOne: async ({where}) => people.find((p) => String(p.id) === String(where.id) && String(p.client_id) === String(where.client_id)) || null,
+    });
+    const call = await service(t);
+
+    assert.deepStrictEqual(await call('POST', '/api/admin/clients/1/users/3/resend-invite', {headers: admin}),
+        {status: 404, body: {error: 'user_not_found'}}, 'only the client’s own users');
+    assert.deepStrictEqual(await call('POST', '/api/admin/clients/1/users/2/resend-invite', {headers: admin}),
+        {status: 400, body: {error: 'already_set_up'}});
+    assert.strictEqual(sent.length, 0);
+
+    const res = await call('POST', '/api/admin/clients/1/users/1/resend-invite', {headers: admin});
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.email_sent, true);
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].to, 'i@acme.co.zw');
+    assert.ok(sent[0].html.includes('/accept-invite?token=setup-token-123'));
+});
+
 test('a manual top-up checks its input before touching the client', async (t) => {
     const admin = adminWithMail(t, async () => [{statusCode: 202}]);
     const call = await service(t);
