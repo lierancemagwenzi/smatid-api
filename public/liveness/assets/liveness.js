@@ -631,6 +631,7 @@ $('inapp-continue').addEventListener('click', () => {
   const {status, data} = await api('').catch(() => ({status: 0, data: {}}));
   if (status !== 200) return showUnavailable(status);
   info = data;
+  $('test-banner').hidden = !info.test;
   if (showState(info)) return;
 
   if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {

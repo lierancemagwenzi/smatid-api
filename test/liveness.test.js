@@ -178,7 +178,7 @@ test('the hosted page runs an attempt; the server decides, and failures can be r
 
     const info = (await call('GET', `/api/liveness/${sid}`)).body;
     assert.deepStrictEqual({...info, page_url: undefined},
-        {status: 'pending', client_name: 'Acme Bank', attempts_left: 3, failure_reason: null, redirect_url: null, page_url: undefined});
+        {status: 'pending', client_name: 'Acme Bank', test: false, attempts_left: 3, failure_reason: null, redirect_url: null, page_url: undefined});
     assert.match(info.page_url, new RegExp(`^http://127\\.0\\.0\\.1:\\d+/liveness/${sid}$`));
     assert.strictEqual((await call('GET', '/api/liveness/lv_nope')).status, 404);
     assert.strictEqual((await call('POST', `/api/liveness/${sid}/submit`, {body: {frames: []}})).body.error, 'not_started');

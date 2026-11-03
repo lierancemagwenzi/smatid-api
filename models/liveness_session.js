@@ -35,6 +35,8 @@ module.exports = (sequelize, DataTypes) => {
             return {
                 session_id: this.public_id,
                 reference: this.reference,
+                // A free test session from the portal, never a real person's check.
+                test: Boolean(this.test),
                 status,
                 passed: status === 'passed',
                 url: `${baseUrl}/liveness/${this.public_id}`,
@@ -75,6 +77,7 @@ module.exports = (sequelize, DataTypes) => {
         webhook_next_at: DataTypes.DATE,
         webhook_last_error: DataTypes.STRING(255),
         webhook_delivered_at: DataTypes.DATE,
+        test: {type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false},
     }, {
         sequelize,
         modelName: 'liveness_session',

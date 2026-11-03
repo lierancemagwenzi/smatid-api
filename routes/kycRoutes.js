@@ -147,6 +147,18 @@ module.exports = function (app) {
     app.route('/api/portal/team').get(user, portal.Team).post(...owner, portal.Invite);
     app.route('/api/portal/team/:id').delete(...owner, portal.RemoveUser);
 
+    // Client portal: run a check by hand. The same log, module switches and credits as the API calls above.
+    const checkAs = [portalAuth.requireUser, portalAuth.asClient];
+    app.route('/api/portal/checks').get(user, portal.CheckOptions);
+
+    // Client portal: free liveness test sessions, for the Developers page. Not charged or logged as usage.
+    app.route('/api/portal/liveness-tests').post(user, modules.requireModule('liveness-check'), liveness.PortalTestCreate);
+    app.route('/api/portal/liveness-tests/:sessionId').get(user, liveness.PortalTestShow);
+    app.route('/api/portal/checks/company')
+        .post(...checkAs, requestLog.log('company'), modules.requireModule('companies-check'), billing.charge('company'), company.Check);
+    app.route('/api/portal/checks/sanctions')
+        .post(...checkAs, requestLog.log('sanctions'), modules.requireModule('sanctions-check'), billing.charge('sanctions'), sanctions.Check);
+
     // Public: what checks cost, for the website's pricing section. No sign-in.
     app.route('/api/public/pricing').get(async (req, res) => {
         try {

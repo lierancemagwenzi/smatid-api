@@ -1,7 +1,8 @@
 const cipzHelper = require('../helpers/cipz/cipzHelper');
 
+// The API takes the number in the path; the portal posts it, since old numbers (1234/2010) have a slash.
 exports.Check = async (req, res) => {
-    const number = (req.params.number || '').trim().toUpperCase();
+    const number = String(req.params.number || (req.body && req.body.number) || '').trim().toUpperCase();
     if (!cipzHelper.isValidNumber(number)) {
         return res.status(400).json({error: 'invalid_registration_number'});
     }

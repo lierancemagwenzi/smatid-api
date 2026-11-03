@@ -68,6 +68,12 @@ module.exports = {
         }
     },
 
+    /** After requireUser: lets the KYC check middleware (log, module, charge) treat the user's company as the client. */
+    asClient: function (req, res, next) {
+        req.client = req.portalClient;
+        next();
+    },
+
     /** After requireUser: only the client's owners. */
     requireOwner: function (req, res, next) {
         if (!req.user.isOwner()) return res.status(403).json({error: 'owner_only'});

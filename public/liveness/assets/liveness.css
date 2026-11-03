@@ -140,3 +140,4 @@ video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 @media (orientation: landscape) and (max-height: 500px) {
   .viewport { aspect-ratio: auto; height: 62vh; }
 }
+.test-banner { margin: 0 0 12px; text-align: center; }

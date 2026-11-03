@@ -73,6 +73,7 @@ function pageView(session, req) {
     return {
         status,
         client_name: session.client.name,
+        test: Boolean(session.test),
         attempts_left: Math.max(0, MAX_ATTEMPTS - session.attempts),
         failure_reason: session.failure_reason || null,
         redirect_url: final ? redirectFor(session, status) : null,
@@ -120,6 +121,63 @@ exports.Show = async (req, res) => {
         return res.json(session.toPublic(baseUrl(req)));
     } catch (err) {
         console.error('Liveness session lookup failed:', err.message);
+        return res.status(500).json({error: 'session_lookup_failed'});
+    }
+};
+
+// ----- Portal test sessions (Developers page). Free, so there's a daily limit per client. -----
+
+const TEST_OUTCOMES = ['passed', 'failed'];
+const testDailyLimit = () => Number(process.env.LIVENESS_TEST_DAILY_LIMIT || 10);
+
+/**
+ * Starts a test session for the signed-in user's company. Without `outcome` it waits for someone to take
+ * the check on the hosted page; with outcome "passed" or "failed" it finishes at once, with no camera, and
+ * its webhook goes out like a real one.
+ */
+exports.PortalTestCreate = async (req, res) => {
+    const outcome = req.body && req.body.outcome;
+    if (outcome !== undefined && outcome !== null && !TEST_OUTCOMES.includes(outcome)) return res.status(400).json({error: 'invalid_outcome'});
+    const client = req.portalClient;
+    try {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const used = await db.liveness_session.count({where: {client_id: client.id, test: true, created_at: {[db.Sequelize.Op.gte]: since}}});
+        if (used >= testDailyLimit()) return res.status(429).json({error: 'test_limit_reached', limit: testDailyLimit()});
+
+        const now = new Date();
+        const fields = {
+            public_id: 'lv_' + crypto.randomBytes(24).toString('base64url'),
+            client_id: client.id,
+            reference: 'portal-test',
+            webhook_url: client.webhook_url || null,
+            expires_at: new Date(now.getTime() + SESSION_MINUTES * 60 * 1000),
+            test: true,
+        };
+        if (outcome) {
+            const passed = outcome === 'passed';
+            Object.assign(fields, {
+                status: outcome, attempts: 1, started_at: now, completed_at: now,
+                result: {passed, failure_reason: passed ? null : 'simulated_failure', scores: null, steps: null, simulated: true},
+                failure_reason: passed ? null : 'simulated_failure',
+            });
+        }
+        const session = await db.liveness_session.create(fields);
+        if (outcome) await deliveryHelper.finished(session);
+        return res.status(201).json({session: session.toPublic(baseUrl(req)), tests_left_today: Math.max(0, testDailyLimit() - used - 1)});
+    } catch (err) {
+        console.error('Liveness test create failed:', err.message);
+        return res.status(500).json({error: 'session_create_failed'});
+    }
+};
+
+/** One of the company's test sessions, for the Developers page to follow. */
+exports.PortalTestShow = async (req, res) => {
+    try {
+        const session = await db.liveness_session.findOne({where: {public_id: String(req.params.sessionId), client_id: req.portalClient.id, test: true}});
+        if (!session) return res.status(404).json({error: 'session_not_found'});
+        return res.json({session: session.toPublic(baseUrl(req))});
+    } catch (err) {
+        console.error('Liveness test lookup failed:', err.message);
         return res.status(500).json({error: 'session_lookup_failed'});
     }
 };

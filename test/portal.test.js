@@ -236,3 +236,89 @@ test('portal calls need a session, and only see their own company', async (t) =>
     assert.strictEqual((await call('GET', `/api/portal/usage/${bRequest.id}`, {token: a.session})).status, 404);
     assert.strictEqual((await call('GET', `/api/portal/usage/${bRequest.id}`, {token: b.session})).status, 200);
 });
+
+test('a portal user runs company and sanctions checks, charged and logged like API calls', async (t) => {
+    if (!available) return t.skip('no database');
+    const mail = inbox(t);
+    const call = await service(t);
+    const {session} = await signedUpOwner(t, mail, call, 'checks');
+    const cipzHelper = require('../helpers/cipz/cipzHelper');
+    const yenteHelper = require('../helpers/sanctions/yenteHelper');
+    const asked = [];
+    stub(t, cipzHelper, {checkCompany: async (number) => (asked.push(number), {found: true, name: 'ACME (PRIVATE) LIMITED', number, address: null, status: 'Verified', verified: true})});
+    stub(t, yenteHelper, {screen: async (query) => (asked.push(query.properties.name[0]), {dataset: 'default', threshold: 0.7, hit: false, sanctioned: false, pep: false, matches: [], near_matches: []})});
+    // Both checks on, at 2 credits each, whatever the modules table holds.
+    const mod = (key) => db.kyc_module.build({key, name: key, status: 'enabled', credit_cost: 2});
+    stub(t, db.kyc_module, {
+        findOne: async ({where}) => mod(where.key),
+        findAll: async ({where}) => where.key.map(mod),
+    });
+
+    assert.strictEqual((await call('POST', '/api/portal/checks/company', {body: {number: '1234/2010'}})).status, 401);
+    const options = await call('GET', '/api/portal/checks', {token: session});
+    assert.deepStrictEqual(options.body.checks.map((c) => [c.check_type, c.credit_cost, c.enabled]), [['company', 2, true], ['sanctions', 2, true]]);
+
+    const before = (await call('GET', '/api/portal/me', {token: session})).body.client.available_credits;
+    const company = await call('POST', '/api/portal/checks/company', {token: session, body: {number: ' 1234/2010 '}});
+    assert.strictEqual(company.status, 200);
+    assert.strictEqual(company.body.name, 'ACME (PRIVATE) LIMITED');
+    const screened = await call('POST', '/api/portal/checks/sanctions', {token: session, body: {type: 'person', name: 'Ada Lovelace'}});
+    assert.strictEqual(screened.status, 200);
+    assert.strictEqual(screened.body.hit, false);
+    assert.deepStrictEqual(asked, ['1234/2010', 'Ada Lovelace']);
+
+    // A refused check is refunded.
+    assert.deepStrictEqual((await call('POST', '/api/portal/checks/company', {token: session, body: {number: '!'}})).body, {error: 'invalid_registration_number'});
+    assert.strictEqual((await call('POST', '/api/portal/checks/sanctions', {token: session, body: {type: 'person'}})).status, 400);
+    // Refunds and log rows are written just after the reply.
+    await new Promise((r) => setTimeout(r, 300));
+    const me = (await call('GET', '/api/portal/me', {token: session})).body;
+    assert.strictEqual(me.client.available_credits, before - 4);
+
+    const logged = await db.api_request.findAll({where: {client_id: me.client.id}, order: [['id', 'ASC']]});
+    assert.deepStrictEqual(logged.map((r) => [r.check_type, r.status, r.credits_charged]), [['company', 200, 2], ['sanctions', 200, 2], ['company', 400, 0], ['sanctions', 400, 0]]);
+    assert.ok(logged[0].path.startsWith('/api/portal/checks/company'));
+    // And they show in the portal's own usage list.
+    assert.strictEqual((await call('GET', '/api/portal/usage', {token: session})).body.total, 4);
+});
+
+test('liveness test sessions from the portal are free, marked as tests, limited per day, and send webhooks', async (t) => {
+    if (!available) return t.skip('no database');
+    const mail = inbox(t);
+    const call = await service(t);
+    const {session} = await signedUpOwner(t, mail, call, 'livetest');
+    const webhookHelper = require('../helpers/webhookHelper');
+    const delivered = [];
+    stub(t, webhookHelper, {send: async (url, event, payload) => delivered.push({url, event, payload})});
+    stub(t, db.kyc_module, {findOne: async ({where}) => db.kyc_module.build({key: where.key, name: where.key, status: 'enabled', credit_cost: 5})});
+    process.env.LIVENESS_TEST_DAILY_LIMIT = '3';
+    t.after(() => delete process.env.LIVENESS_TEST_DAILY_LIMIT);
+    await call('PUT', '/api/portal/webhook', {token: session, body: {webhook_url: 'https://hooks.example.com/smatid'}});
+    const before = (await call('GET', '/api/portal/me', {token: session})).body.client.available_credits;
+
+    assert.strictEqual((await call('POST', '/api/portal/liveness-tests', {body: {}})).status, 401);
+    assert.deepStrictEqual((await call('POST', '/api/portal/liveness-tests', {token: session, body: {outcome: 'maybe'}})).body, {error: 'invalid_outcome'});
+
+    const live = await call('POST', '/api/portal/liveness-tests', {token: session, body: {}});
+    assert.strictEqual(live.status, 201);
+    assert.deepStrictEqual([live.body.session.status, live.body.session.test, live.body.tests_left_today], ['pending', true, 2]);
+    assert.match(live.body.session.url, /\/liveness\/lv_/);
+    const page = await call('GET', `/api/liveness/${live.body.session.session_id}`);
+    assert.strictEqual(page.body.test, true, 'the hosted page knows it is a test');
+
+    const passed = await call('POST', '/api/portal/liveness-tests', {token: session, body: {outcome: 'passed'}});
+    assert.deepStrictEqual([passed.body.session.status, passed.body.session.passed, passed.body.session.webhook.url], ['passed', true, 'https://hooks.example.com/smatid']);
+    const failed = await call('POST', '/api/portal/liveness-tests', {token: session, body: {outcome: 'failed'}});
+    assert.deepStrictEqual([failed.body.session.status, failed.body.session.failure_reason, failed.body.tests_left_today], ['failed', 'simulated_failure', 0]);
+    assert.deepStrictEqual((await call('POST', '/api/portal/liveness-tests', {token: session, body: {}})).body, {error: 'test_limit_reached', limit: 3});
+
+    // Webhooks go out just after the reply.
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepStrictEqual(delivered.map((d) => [d.event, d.payload.status, d.payload.test]), [['liveness.completed', 'passed', true], ['liveness.completed', 'failed', true]]);
+    const shown = await call('GET', `/api/portal/liveness-tests/${passed.body.session.session_id}`, {token: session});
+    assert.strictEqual(shown.body.session.webhook.status, 'delivered');
+
+    const me = (await call('GET', '/api/portal/me', {token: session})).body;
+    assert.strictEqual(me.client.available_credits, before, 'no credits used');
+    assert.strictEqual((await call('GET', '/api/portal/usage', {token: session})).body.total, 0, 'not in usage');
+});

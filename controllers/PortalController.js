@@ -172,6 +172,26 @@ exports.RotateWebhookSecret = async (req, res) => {
     }
 };
 
+// ----- Checks run from the portal -----
+
+const PORTAL_CHECKS = [{check_type: 'company', module: 'companies-check'}, {check_type: 'sanctions', module: 'sanctions-check'}];
+
+/** What each portal check costs and whether it's switched on. */
+exports.CheckOptions = async (req, res) => {
+    try {
+        const mods = await db.kyc_module.findAll({where: {key: PORTAL_CHECKS.map((c) => c.module)}});
+        const byKey = new Map(mods.map((m) => [m.key, m]));
+        return res.json({
+            checks: PORTAL_CHECKS.map((c) => {
+                const m = byKey.get(c.module);
+                return {check_type: c.check_type, name: m ? m.name : c.check_type, credit_cost: m ? m.credit_cost : 0, enabled: Boolean(m && m.status === 'enabled')};
+            }),
+        });
+    } catch (err) {
+        return fail(res, 'Check options', err, 'checks_failed');
+    }
+};
+
 // ----- Team -----
 
 exports.Team = async (req, res) => {
