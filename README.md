@@ -7,8 +7,10 @@ KYC checks for Smatid as a small Express service, laid out like `smatpay_whatsap
 | --- | --- | --- |
 | Company registration (CIPZ) | `GET /api/kyc/company/:number` | done |
 | National ID extraction | | planned |
-| Passport extraction | | planned |
-| Photo identification | | planned |
+| Passport scan (Flutter SDK, MRZ) | `POST /api/kyc/passport` | done |
+| Passport chip (NFC, passive authentication) | `POST /api/kyc/passport/:id/chip` | done |
+| Passport extraction from a photo | | planned |
+| Face match (passport photo vs liveness) | `POST /api/kyc/passport/:id/face-match` | done |
 | Liveness (hosted page) | `POST /api/kyc/liveness` | done |
 | Sanctions and PEPs (OpenSanctions) | `POST /api/kyc/sanctions` | done |
 
@@ -22,6 +24,7 @@ npm run db:migrate
 npm run admin:create -- --email you@smatid.com --name "Your Name"   # first admin; asks for a password
 npm start              # listens on PORT (8011)
 npm test
+npm run models:download   # the face match model (38 MB), once per install
 ```
 
 ## Clients and access tokens
@@ -80,6 +83,9 @@ module is disabled, or missing from the table, its endpoint answers every client
 | `companies-check` | `GET /api/kyc/company/:number` |
 | `sanctions-check` | `POST /api/kyc/sanctions` |
 | `liveness-check` | `POST /api/kyc/liveness`, `GET /api/kyc/liveness/:id` and the hosted page |
+| `passport-check` | `POST /api/kyc/passport`, `GET /api/kyc/passport/:id` (2 credits) |
+| `passport-chip` | `POST /api/kyc/passport/:id/chip`, `GET /api/kyc/passport/:id/chip/photo` (2 credits) |
+| `face-match` | `POST /api/kyc/passport/:id/face-match` (1 credit) |
 
 The migration creates both as enabled. An admin can create more, e.g. `liveness-check`, ahead of the code:
 the list shows `connected: false` until an endpoint checks that key with
@@ -198,6 +204,212 @@ biometric data: decide how long to keep them.
 Expired sessions are marked every 30 seconds, which also sends their webhook.
 
 The face models need about 300 MB of memory once loaded, the first time a check is taken after a restart.
+
+## Passport scan
+
+The Smatid Flutter SDK (`smatid_kyc_flutter`) reads a passport's photo page with the phone camera. It reads
+the MRZ (the two lines of `<<<` text at the bottom) on the phone, and once two reads in a row agree and
+every check digit matches, it takes a picture and sends both here with the client's token:
+
+```bash
+curl -X POST localhost:8011/api/kyc/passport -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{
+  "mrz": ["P<ZWEMOYO<<TARIRO<GRACE<<<<<<<<<<<<<<<<<<<<<", "FN12345672ZWE9003129F3101012<<<<<<<<<<<<<<<0"],
+  "image": "<base64 JPEG of the photo page>",
+  "reference": "cust-42"
+}'
+```
+
+`mrz` can be the two lines, or all the text read off the page (as a list of lines or one string); the
+server finds the two lines in it. `reference` is optional; `device` (SDK version, platform, time taken)
+is filled in by the SDK. The picture can be up to `PASSPORT_MAX_IMAGE_KB` (2048) and must be a JPEG.
+
+| Status | Body |
+| --- | --- |
+| 201 | The scan: `{scan_id, reference, status, passed, failure_reason, document, checks, mrz, has_image, created_at}` |
+| 422 | `{error: "mrz_unreadable", problems: [...], mrz}`: the MRZ wasn't found, or a check digit didn't match. Scan again. Not charged |
+| 400 | `mrz_required`, `invalid_image`, `invalid_reference`. Not charged |
+
+```json
+{
+  "scan_id": "ps_…", "reference": "cust-42", "status": "passed", "passed": true, "failure_reason": null,
+  "document": {
+    "document_type": "P", "issuing_country": "ZWE", "surname": "MOYO", "given_names": "TARIRO GRACE",
+    "name_truncated": false, "document_number": "FN1234567", "nationality": "ZWE",
+    "birth_date": "1990-03-12", "birth_date_partial": false, "sex": "F", "expiry_date": "2031-01-01", "expired": false, "personal_number": null
+  },
+  "checks": {"document_number": true, "birth_date": true, "expiry_date": true, "personal_number": true, "composite": true},
+  "mrz": ["P<ZWEMOYO<<TARIRO<GRACE<<<<<<<<<<<<<<<<<<<<<", "FN12345672ZWE9003129F3101012<<<<<<<<<<<<<<<0"],
+  "has_image": true, "created_at": "…"
+}
+```
+
+- `status` is `passed` when the MRZ reads cleanly and the passport is in date, and `failed` with
+  `failure_reason: "document_expired"` when it has expired. A failed scan was still read, so it's charged.
+- **What the server checks.** `helpers/passport/mrzHelper.js` parses the lines itself (it doesn't trust the
+  phone's parse), fixes the usual OCR mix-ups (`O`/`0`, `I`/`1`, `S`/`5`, `B`/`8`, …) only where the
+  character type is fixed, and requires every ICAO 9303 check digit to match. Check digits catch misreads,
+  not forgeries: anyone can compute them. The server doesn't read the picture yet, so it can't yet tell
+  whether the MRZ sent matches the photo page. That's the next phase (reading details from the photo).
+- Birth years in the future are taken as last century (`300101` → 1930). Names that fill the whole field
+  are flagged `name_truncated`.
+- **Unknown birth dates.** Some passports don't give the whole date of birth: ICAO 9303 fills the unknown
+  day, month or year with `<`, and some countries use `X`. These are accepted, with `birth_date` as far as
+  it's known (`1990-03`, `1990`, or `null` when even the year isn't) and `birth_date_partial: true`. The
+  check digit still has to match. Those forms are the ones `POST /api/kyc/sanctions` takes, so the date can
+  be passed straight on. Expiry dates must always be complete.
+- Get a scan again with `GET /api/kyc/passport/:scan_id`, and its picture with
+  `GET /api/kyc/passport/:scan_id/image`. Only the client that made it can.
+- Pictures are kept in `storage/passport/<scan>.jpg` (or `PASSPORT_STORAGE_DIR`). Admins can see a scan
+  with `GET /api/admin/passport/:scan_id` and its picture at `…/image`; usage rows link to it
+  (`passport_scan_id`). The picture is never written to the request log, only its size.
+- The token is in the app, so anyone with the app can extract it. Give each app its own client and
+  token, so a leaked one can be revoked without breaking anything else.
+
+## Passport chip
+
+Most passports issued since about 2006 (Zimbabwe's since late 2021) have a chip holding the MRZ details
+(DG1), the holder's photo (DG2), and EF.SOD: a hash of each of those, signed by the issuing country. The
+SDK reads the chip over NFC after the photo page scan (the MRZ is the key that opens it) and sends the raw
+files here, for that scan:
+
+```bash
+curl -X POST localhost:8011/api/kyc/passport/ps_.../chip -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{
+  "files": {"sod": "<base64>", "dg1": "<base64>", "dg2": "<base64>", "dg14": "<base64, if the chip has it>"},
+  "access": "pace"
+}'
+```
+
+The reply is the scan, with `chip`:
+
+```json
+"chip": {
+  "status": "verified", "verified": true,
+  "checks": {"data_intact": true, "signature_valid": true, "issuer_trusted": true, "matches_scan": true, "signer_certificate_current": true},
+  "problems": [], "differences": [],
+  "document": {"surname": "MOYO", "given_names": "TARIRO GRACE", "document_number": "FN1234567", "…": "…"},
+  "signer": {"country": "ZW", "subject": "…", "serial": "…", "valid_from": "…", "valid_to": "…"},
+  "csca": {"country": "ZW", "subject": "…"},
+  "signature_algorithm": "ecdsa-sha256", "data_groups": {"dg1": true, "dg2": true, "hash_algorithm": "sha256", "listed": [1, 2, 14]},
+  "photo": {"format": "jpeg", "original_format": "jp2", "width": 480, "height": 640, "bytes": 44402}, "has_photo": true,
+  "clone_check": "not_done", "access": "pace", "read_at": "…"
+}
+```
+
+What `helpers/passport/chipHelper.js` checks (ICAO 9303 part 11, "passive authentication"):
+
+1. **`data_intact`**: every file sent is listed in EF.SOD and hashes to its entry, and EF.SOD's own digest holds.
+2. **`signature_valid`**: the Document Signer's signature over that list (RSA, RSA-PSS, ECDSA, and BSI "plain"
+   ECDSA on NIST or brainpool curves).
+3. **`issuer_trusted`**: the Document Signer's certificate was issued by a CSCA in `config/csca/` (see the
+   README there). `null` when there's no CSCA for that country at all.
+4. **`matches_scan`**: the chip's document number, birth date and expiry date are the scan's (`differences`
+   lists any that aren't). The chip only opens with a key made from those three, so they can't differ on the
+   same passport. Names, nationality and sex have no check digit on the photo page and the camera can misread
+   them (a `<` read as `K` after a name happened on a real Zimbabwean passport); those differences are listed in
+   `scan_corrections` (`{field, scan, chip}`) and don't fail the check. Use the chip's `document` for them.
+
+| `status` | Meaning |
+| --- | --- |
+| `verified` | All four hold: the data is what the issuing country signed, and it's this passport |
+| `unverified` | Intact and signed, but there's no CSCA for that country, so who signed it is unknown |
+| `failed` | Something didn't hold; `problems` says what (`dg1_hash_mismatch`, `signature_invalid`, `signer_not_issued_by_csca`, `chip_differs_from_scan`, …) |
+
+- A chip check that ran is charged, whatever it found. Missing or broken files are a `400` or a `422
+  chip_data_invalid` and aren't charged.
+- **Not checked yet: copies.** A cloned chip carries a valid signature too. Chip authentication (DG14) and
+  active authentication (DG15) catch that; `clone_check` stays `not_done` until they're added.
+- The raw files are kept in `storage/passport/<scan>/chip-*.bin`, so a scan can be checked again (e.g. after
+  adding a country's CSCA).
+- **The face picture is always served as JPEG** (`chip-photo.jpg`). Many chips, Zimbabwe's included, store it
+  as JPEG 2000, which browsers and Flutter can't show. `helpers/passport/photoHelper.js` decodes it with
+  OpenJPEG (`@cornerstonejs/codec-openjpeg`, WebAssembly) and re-encodes it with jpeg-js, in about 100 ms. The
+  original is kept as `chip-photo-original.jp2`. If one can't be decoded, `photo.conversion_error` says why,
+  and the original is what's served.
+- `GET /api/admin/csca` lists the certificates loaded, by country; `POST /api/admin/csca` reloads
+  `config/csca/` after adding files.
+
+## Face match
+
+Is the person who took a liveness check the passport's holder? After a passport scan (ideally with its
+chip read) and a liveness check the person passed:
+
+```bash
+curl -X POST localhost:8011/api/kyc/passport/ps_.../face-match -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"liveness_session_id": "lv_..."}'
+```
+
+The reply is the scan, with `face_match`:
+
+```json
+"face_match": {
+  "status": "match", "matched": true, "similarity": 0.62, "thresholds": {"match": 0.4, "review": 0.25},
+  "model": "sface-2021dec", "passport_photo": "chip", "chip_verified": true,
+  "liveness_session_id": "lv_…", "liveness_passed": true, "identity_verified": true, "checked_at": "…"
+}
+```
+
+- **`status`**: `match`, `review` (for a person to look at both pictures), or `no_match`.
+- **`identity_verified`**: the whole chain held. The chip was verified (signed by the issuing country), the
+  liveness check passed, and the faces match.
+- **Which passport photo**: the chip's (`passport_photo: "chip"`) when it was read, since it's signed and
+  clean. Otherwise the photo page scan, where the printed photo is small and often has glare, so a face
+  isn't always found there (`422 no_face_in_passport`).
+- The liveness check has to be this client's and `passed` (`409 liveness_not_passed` otherwise). Its
+  straight-on frame from the passing try is the one compared.
+- **How it compares**: Human (the liveness face models) finds each face and its eyes, nose and mouth
+  corners. The face is aligned onto a 112×112 template, and **SFace** (OpenCV model zoo, Apache 2.0, 99.4%
+  on LFW) turns it into a descriptor. `similarity` is the cosine of the two descriptors.
+- **The bars**, `FACE_MATCH_MIN_MATCH` (0.4) and `FACE_MATCH_MIN_REVIEW` (0.25), were set on 2026-11-06 from
+  one person's chip photo and 7 liveness checks (0.31–0.78 against each other, median 0.62) against 8 other
+  people (at most 0.18). OpenCV's own bar for SFace is 0.363. Tune them as real checks come in.
+- Errors that mean no comparison was made (`400`, `404`, `409`, `422`) aren't charged.
+
+## Verification sessions (the Smatid Verify app)
+
+A client's app doesn't run the checks itself: it opens a **verification session** with its token, sends
+the person to the **Smatid Verify** app, and reads the result. Smatid Verify holds no token; the session
+is its key, and the session says what to check.
+
+```bash
+# 1. The client opens a session. type: liveness | passport | passport_chip | full
+curl -X POST localhost:8011/api/kyc/verifications -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"type": "full", "reference": "cust-42", "return_url": "acmewallet://kyc/done"}'
+# → 201 {"verification_id": "vs_…", "code": "K7QM-4P2X", "app_link": "smatid-verify://verify?id=vs_…", "status": "pending", …}
+
+# 2. The client app opens app_link (or shows the code to type into Smatid Verify).
+# 3. The person does the checks. Smatid Verify sends them back to return_url?verification_id=…&status=completed.
+# 4. The client reads the result:
+curl localhost:8011/api/kyc/verifications/vs_… -H "Authorization: Bearer $TOKEN"
+```
+
+| `type` | Steps, in order |
+| --- | --- |
+| `liveness` | liveness |
+| `passport` | passport (photo page) |
+| `passport_chip` | passport, chip |
+| `full` | passport, chip, liveness, face_match |
+
+The result has `status` (`pending`, `in_progress`, `completed`, `cancelled`, `expired`), each step
+(`passed`, `review`, `failed`, `skipped`, `not_done`), and, once completed, `outcome`:
+
+- `verified`: every step passed;
+- `review`: none failed, but one needs a person (a face match `review`, a chip that's `unverified`) or the chip
+  was skipped (no NFC on the phone, or no chip in the passport);
+- `failed`: a step failed;
+- `incomplete`: the app finished without doing every step.
+
+`passport` and `liveness` hold the checks' full results, as `GET /api/kyc/passport/:id` and
+`GET /api/kyc/liveness/:id` give them. If the client has a default webhook, `verification.completed` is
+sent there once (signed as usual); otherwise, or as well, read the result with the GET above.
+
+**The app's side** (`/api/verify/...`, no token): `POST /api/verify/claim {code}` turns a typed code into the
+session's ID (20 tries per IP per 15 minutes). `GET /api/verify/:id` says who's asking and what to do, and
+marks the session in progress. The checks go through `/api/verify/:id/passport`, `…/passport/:scan/chip`,
+`…/liveness` and `…/passport/:scan/face-match`, the same as their `/api/kyc` versions, and are logged and
+charged to the client. Only the session type's steps are allowed, only on the session's own scan and
+liveness check, and only while it's open. The session sets the `reference`; the app can't set a webhook.
+`POST …/complete {skipped: {chip: "no_nfc"}}` closes it, and `POST …/cancel` cancels it. Sessions last
+`VERIFICATION_SESSION_MINUTES` (30).
 
 ## Payment settings
 

@@ -25,6 +25,60 @@ module.exports = function (app) {
     app.route('/api/kyc/liveness/:sessionId/image')
         .get(auth.requireClient, modules.requireModule('liveness-check'), liveness.Image);
 
+    // Passport: the Smatid Flutter SDK sends the MRZ it read and the photo page picture, with the client's token.
+    const passport = require('../controllers/PassportController');
+    app.route('/api/kyc/passport')
+        .post(auth.requireClient, requestLog.log('passport', {redact: ['image']}), modules.requireModule('passport-check'), billing.charge('passport'), passport.Scan);
+    app.route('/api/kyc/passport/:scanId')
+        .get(auth.requireClient, requestLog.log('passport'), modules.requireModule('passport-check'), passport.Show);
+    app.route('/api/kyc/passport/:scanId/image')
+        .get(auth.requireClient, modules.requireModule('passport-check'), passport.Image);
+    // The passport's chip, read over NFC by the SDK after the photo page scan.
+    app.route('/api/kyc/passport/:scanId/chip')
+        .post(auth.requireClient, requestLog.log('passport_chip', {redact: ['files']}), modules.requireModule('passport-chip'), billing.charge('passport_chip'), passport.Chip);
+    app.route('/api/kyc/passport/:scanId/chip/photo')
+        .get(auth.requireClient, modules.requireModule('passport-chip'), passport.ChipPhoto);
+    // The passport's photo against the face from a passed liveness check.
+    app.route('/api/kyc/passport/:scanId/face-match')
+        .post(auth.requireClient, requestLog.log('face_match'), modules.requireModule('face-match'), billing.charge('face_match'), passport.FaceMatch);
+
+    // Verification sessions: a client opens one, the person does it in the Smatid Verify app, the client
+    // reads the result. Each check the app runs is logged and charged to that client, as above.
+    const verification = require('../controllers/VerificationController');
+    app.route('/api/kyc/verifications')
+        .post(auth.requireClient, verification.Create);
+    app.route('/api/kyc/verifications/:verificationId')
+        .get(auth.requireClient, verification.Show);
+
+    // The Smatid Verify app: no token, the session's ID is the key.
+    const vs = verification.requireSession;
+    app.route('/api/verify/claim')
+        .post(verification.Claim);
+    app.route('/api/verify/:verificationId')
+        .get(vs(), verification.AppShow);
+    app.route('/api/verify/:verificationId/complete')
+        .post(vs(), verification.Complete);
+    app.route('/api/verify/:verificationId/cancel')
+        .post(vs(), verification.Cancel);
+    app.route('/api/verify/:verificationId/passport')
+        .post(vs('passport'), requestLog.log('passport', {redact: ['image']}), modules.requireModule('passport-check'), billing.charge('passport'),
+            verification.link('passport_scan_id', 'scan_id'), passport.Scan);
+    app.route('/api/verify/:verificationId/passport/:scanId/chip')
+        .post(vs('chip'), verification.ownsScan, requestLog.log('passport_chip', {redact: ['files']}), modules.requireModule('passport-chip'),
+            billing.charge('passport_chip'), passport.Chip);
+    app.route('/api/verify/:verificationId/passport/:scanId/chip/photo')
+        .get(vs(), verification.ownsScan, modules.requireModule('passport-chip'), passport.ChipPhoto);
+    app.route('/api/verify/:verificationId/passport/:scanId/face-match')
+        .post(vs('face_match'), verification.ownsScan, verification.sameLiveness, requestLog.log('face_match'), modules.requireModule('face-match'),
+            billing.charge('face_match'), passport.FaceMatch);
+    app.route('/api/verify/:verificationId/liveness')
+        .post(vs('liveness'), requestLog.log('liveness'), modules.requireModule('liveness-check'), billing.charge('liveness'),
+            verification.link('liveness_session_id', 'session_id'), liveness.Create);
+    app.route('/api/verify/:verificationId/liveness/:sessionId')
+        .get(vs(), verification.ownsLiveness, modules.requireModule('liveness-check'), liveness.Show);
+    app.route('/api/verify/:verificationId/liveness/:sessionId/image')
+        .get(vs(), verification.ownsLiveness, modules.requireModule('liveness-check'), liveness.Image);
+
     // The client's default webhook, used by sessions that don't give their own.
     app.route('/api/kyc/webhook')
         .get(auth.requireClient, liveness.Webhook)
@@ -112,6 +166,16 @@ module.exports = function (app) {
         .get(auth.requireAdmin, liveness.AdminShow);
     app.route('/api/admin/liveness/:sessionId/frames/:frame')
         .get(auth.requireAdmin, liveness.AdminFrame);
+    app.route('/api/admin/passport/:scanId')
+        .get(auth.requireAdmin, passport.AdminShow);
+    app.route('/api/admin/passport/:scanId/image')
+        .get(auth.requireAdmin, passport.AdminImage);
+    app.route('/api/admin/passport/:scanId/chip/photo')
+        .get(auth.requireAdmin, passport.AdminChipPhoto);
+    // The CSCA certificates passport chips are checked against; POST reads config/csca/ again.
+    app.route('/api/admin/csca')
+        .get(auth.requireAdmin, passport.AdminCsca)
+        .post(auth.requireAdmin, passport.AdminCsca);
     app.route('/api/admin/stats')
         .get(auth.requireAdmin, usage.Stats);
 

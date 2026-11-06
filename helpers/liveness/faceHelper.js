@@ -1,4 +1,5 @@
 const fs = require('fs');
+const {landmarksFromMesh} = require('../passport/faceEmbedHelper');
 const path = require('path');
 const jpeg = require('jpeg-js');
 
@@ -120,6 +121,8 @@ module.exports = {
                         real: f.real,
                         live: f.live,
                         embedding: f.embedding ? Array.from(f.embedding) : null,
+                        // Eyes, nose tip and mouth corners, for aligning the face (passport face match).
+                        landmarks: landmarksFromMesh(f.mesh),
                     })),
                 };
             } finally {

@@ -2,3 +2,5 @@
 .env
 .DS_Store
 storage/
+# The face model (38 MB): npm run models:download
+vendor/face/*.onnx

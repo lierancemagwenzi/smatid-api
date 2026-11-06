@@ -8,6 +8,13 @@ module.exports = {
             const response = row.response || {};
             return (request.body && request.body.reference) || response.reference || (request.params && request.params.sessionId) || response.session_id || null;
         }
+        if (['passport', 'passport_chip', 'face_match'].includes(row.check_type)) {
+            const response = row.response || {};
+            const doc = response.document || {};
+            const name = [doc.given_names, doc.surname].filter(Boolean).join(' ');
+            return (request.body && request.body.reference) || (name && doc.document_number ? `${name} (${doc.document_number})` : name)
+                || (request.params && request.params.scanId) || response.scan_id || null;
+        }
         const body = request.body || {};
         if (body.name) return String(body.name);
         const parts = [body.first_name, body.middle_name, body.last_name].filter(Boolean);
@@ -31,6 +38,23 @@ module.exports = {
             if (status === 'expired') return {outcome: 'expired', label: 'Link expired'};
             if (row.status === 201) return {outcome: 'pending', label: 'Session opened'};
             return {outcome: 'pending', label: r.attempts ? `In progress (${r.attempts} ${r.attempts === 1 ? 'try' : 'tries'} so far)` : 'Not taken yet'};
+        }
+        if (row.check_type === 'face_match') {
+            const m = r.face_match || {};
+            const score = m.similarity === undefined ? '' : ` (${m.similarity})`;
+            if (m.status === 'match') return {outcome: 'passed', label: `Same person${score}`};
+            if (m.status === 'review') return {outcome: 'pending', label: `Needs review${score}`};
+            return {outcome: 'failed', label: `Not the same person${score}`};
+        }
+        if (row.check_type === 'passport_chip') {
+            const chip = r.chip || {};
+            if (chip.status === 'verified') return {outcome: 'passed', label: `Chip verified: ${chip.signer ? chip.signer.country : ''}`.trim()};
+            if (chip.status === 'unverified') return {outcome: 'pending', label: 'Chip intact; no CSCA for its country'};
+            return {outcome: 'failed', label: `Chip failed: ${(chip.problems || [])[0] || 'not valid'}`};
+        }
+        if (row.check_type === 'passport') {
+            if (r.status === 'passed') return {outcome: 'passed', label: `Passport read: ${r.document ? r.document.issuing_country : ''}`.trim()};
+            return {outcome: 'failed', label: `Failed: ${r.failure_reason || 'not valid'}`};
         }
         if (row.check_type === 'sanctions') {
             if (!r.hit) return {outcome: 'clear', label: 'No match'};
@@ -65,6 +89,8 @@ module.exports = {
             ...this.listItem(row),
             // Liveness rows link to their session, whose frames the admin can look at.
             liveness_session_id: row.check_type === 'liveness' ? response.session_id || null : null,
+            // Passport rows link to their scan, whose picture the admin can look at.
+            passport_scan_id: ['passport', 'passport_chip', 'face_match'].includes(row.check_type) ? response.scan_id || null : null,
             method: row.method,
             path: row.path,
             ip: row.ip,

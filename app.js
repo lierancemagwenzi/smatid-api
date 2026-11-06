@@ -14,6 +14,10 @@ app.use(morgan('dev'));
 app.use(require('./helpers/corsHelper').allowOrigins());
 // The liveness page uploads its camera frames as JSON, so it gets a larger limit than everything else.
 app.use('/api/liveness', express.json({limit: '4mb'}));
+// So does a passport scan, which carries the photo page picture.
+app.use('/api/kyc/passport', express.json({limit: '4mb'}));
+// And the Smatid Verify app's uploads of the same, through a verification session.
+app.use('/api/verify', express.json({limit: '4mb'}));
 app.use(express.json({limit: '1mb'}));
 
 // The hosted liveness page: its own files, the face library and models it runs in the browser.

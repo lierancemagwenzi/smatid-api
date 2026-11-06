@@ -11,12 +11,14 @@
     "db:create": "sequelize-cli db:create",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "admin:create": "node scripts/createAdmin.js"
+    "admin:create": "node scripts/createAdmin.js",
+    "models:download": "node scripts/downloadFaceModel.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@cornerstonejs/codec-openjpeg": "^1.3.6",
     "@sendgrid/mail": "^8.1.6",
     "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "@tensorflow/tfjs-converter": "^4.22.0",
@@ -28,6 +30,7 @@
     "jpeg-js": "^0.4.4",
     "morgan": "^1.10.1",
     "mysql2": "^3.24.6",
+    "onnxruntime-node": "^1.31.1",
     "qrcode": "^1.5.4",
     "sequelize": "^6.37.8"
   },

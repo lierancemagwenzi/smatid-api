@@ -454,3 +454,6 @@ exports.AdminFrame = (req, res) => {
         if (err && !res.headersSent) res.status(404).json({error: 'frame_not_found'});
     });
 };
+
+// Shared with verification sessions, whose return links follow the same rules.
+exports.validRedirect = validRedirect;

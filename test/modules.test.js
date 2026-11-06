@@ -103,16 +103,16 @@ test('the admin lists, creates and switches modules', async (t) => {
     assert.strictEqual(list.body.modules[0].connected, true, 'an endpoint checks this key');
 
     assert.strictEqual((await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'Bad Key', name: 'X'}})).body.error, 'invalid_key');
-    assert.strictEqual((await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'passport-check'}})).body.error, 'name_required');
-    assert.strictEqual((await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'passport-check', name: 'L', status: 'on'}})).body.error,
+    assert.strictEqual((await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'national-id-check'}})).body.error, 'name_required');
+    assert.strictEqual((await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'national-id-check', name: 'L', status: 'on'}})).body.error,
         'status_must_be_enabled_or_disabled');
     assert.strictEqual((await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'sanctions-check', name: 'Again'}})).status, 409);
 
-    const created = await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'passport-check', name: ' Passport ', status: 'disabled'}});
+    const created = await call('POST', '/api/admin/modules', {headers: admin, body: {key: 'national-id-check', name: ' National ID ', status: 'disabled'}});
     assert.strictEqual(created.status, 201);
     assert.deepStrictEqual(
         [created.body.module.key, created.body.module.name, created.body.module.status, created.body.module.connected],
-        ['passport-check', 'Passport', 'disabled', false],
+        ['national-id-check', 'National ID', 'disabled', false],
     );
 
     const off = await call('PATCH', '/api/admin/modules/1', {headers: admin, body: {status: 'disabled', key: 'renamed'}});
