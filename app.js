@@ -16,6 +16,9 @@ app.use(require('./helpers/corsHelper').allowOrigins());
 app.use('/api/liveness', express.json({limit: '4mb'}));
 // So does a passport scan, which carries the photo page picture.
 app.use('/api/kyc/passport', express.json({limit: '4mb'}));
+app.use('/api/kyc/id-card', express.json({limit: '4mb'}));
+// A document to proofread: up to 15 MB of PDF, which is a third more as base64.
+app.use(['/api/kyc/document', '/api/portal/checks/document'], express.json({limit: '21mb'}));
 // And the Smatid Verify app's uploads of the same, through a verification session.
 app.use('/api/verify', express.json({limit: '4mb'}));
 app.use(express.json({limit: '1mb'}));
@@ -29,6 +32,17 @@ app.use('/liveness/wasm', express.static(path.dirname(require.resolve('@tensorfl
 
 const kycRoutes = require('./routes/kycRoutes');
 kycRoutes(app);
+
+// A body too big, or not JSON: answer in JSON like everything else, not with Express's HTML page.
+app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (err.type === 'entity.too.large') {
+        return res.status(413).json({error: req.path.includes('document') ? 'file_too_large' : 'body_too_large'});
+    }
+    if (err.type === 'entity.parse.failed') return res.status(400).json({error: 'invalid_json'});
+    console.error('Unhandled error:', err.message);
+    return res.status(500).json({error: 'server_error'});
+});
 
 db.sequelize.authenticate()
     .then(() => console.log('Database connected successfully'))

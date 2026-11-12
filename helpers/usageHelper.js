@@ -15,6 +15,11 @@ module.exports = {
             return (request.body && request.body.reference) || (name && doc.document_number ? `${name} (${doc.document_number})` : name)
                 || (request.params && request.params.scanId) || response.scan_id || null;
         }
+        if (row.check_type === 'document') {
+            const response = row.response || {};
+            const body = request.body || {};
+            return body.reference || body.filename || response.filename || (request.params && request.params.checkId) || response.check_id || null;
+        }
         const body = request.body || {};
         if (body.name) return String(body.name);
         const parts = [body.first_name, body.middle_name, body.last_name].filter(Boolean);
@@ -55,6 +60,12 @@ module.exports = {
         if (row.check_type === 'passport') {
             if (r.status === 'passed') return {outcome: 'passed', label: `Passport read: ${r.document ? r.document.issuing_country : ''}`.trim()};
             return {outcome: 'failed', label: `Failed: ${r.failure_reason || 'not valid'}`};
+        }
+        if (row.check_type === 'document') {
+            const kind = r.document ? String(r.document.type || '').replace(/_/g, ' ') : 'document';
+            if (r.verdict === 'clean') return {outcome: 'passed', label: `Clean ${kind} (score ${r.score})`};
+            if (r.verdict === 'review') return {outcome: 'pending', label: `Review: ${(r.findings || [])[0] ? r.findings[0].title : kind}`};
+            return {outcome: 'failed', label: `Suspicious: ${(r.findings || [])[0] ? r.findings[0].title : kind}`};
         }
         if (row.check_type === 'sanctions') {
             if (!r.hit) return {outcome: 'clear', label: 'No match'};

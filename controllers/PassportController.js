@@ -5,32 +5,13 @@ const mrzHelper = require('../helpers/passport/mrzHelper');
 const chipHelper = require('../helpers/passport/chipHelper');
 const photoHelper = require('../helpers/passport/photoHelper');
 const faceMatchHelper = require('../helpers/passport/faceMatchHelper');
+const scanHelper = require('../helpers/scanHelper');
 const db = require('../models');
 
-const MAX_IMAGE_BYTES = Number(process.env.PASSPORT_MAX_IMAGE_KB || 2048) * 1024;
 const SCAN_ID = /^ps_[A-Za-z0-9_-]{32}$/;
+const {listQuery} = require('../helpers/adminListHelper');
 const storageDir = () => process.env.PASSPORT_STORAGE_DIR || path.join(__dirname, '..', 'storage', 'passport');
-
-/** The JPEG from the app: base64, with or without a data: prefix. Null if it isn't a usable JPEG. */
-function decodeImage(value) {
-    if (typeof value !== 'string' || !value) return null;
-    const buffer = Buffer.from(value.replace(/^data:image\/jpeg;base64,/, ''), 'base64');
-    // JPEG files start FF D8 FF.
-    if (buffer.length < 1024 || buffer.length > MAX_IMAGE_BYTES || buffer[0] !== 0xff || buffer[1] !== 0xd8 || buffer[2] !== 0xff) return null;
-    return buffer;
-}
-
-/** Only the few things the SDK reports about itself; anything else is dropped. */
-function deviceInfo(value) {
-    if (!value || typeof value !== 'object') return null;
-    const out = {};
-    for (const key of ['sdk', 'sdk_version', 'platform', 'os_version', 'scan_ms', 'frames']) {
-        const v = value[key];
-        if (typeof v === 'string') out[key] = v.slice(0, 64);
-        else if (typeof v === 'number' && Number.isFinite(v)) out[key] = v;
-    }
-    return Object.keys(out).length ? out : null;
-}
+const {decodeImage, deviceInfo} = scanHelper;
 
 /**
  * A scanned passport photo page: the MRZ lines the app read and the picture it took. The server
@@ -76,17 +57,7 @@ exports.Scan = async (req, res) => {
 };
 
 /** storage/passport/<scan>.jpg. Returns the file name, or null if it couldn't be written. */
-async function saveImage(publicId, buffer) {
-    try {
-        await fs.promises.mkdir(storageDir(), {recursive: true});
-        const name = `${publicId}.jpg`;
-        await fs.promises.writeFile(path.join(storageDir(), name), buffer);
-        return name;
-    } catch (err) {
-        console.error(`Could not save passport image for ${publicId}:`, err.message);
-        return null;
-    }
-}
+const saveImage = (publicId, buffer) => scanHelper.saveImage(storageDir(), publicId, buffer);
 
 exports.Show = async (req, res) => {
     try {
@@ -232,8 +203,8 @@ exports.ChipPhoto = async (req, res) => {
 
 // ----- Face match (passport photo against a liveness check) -----
 
-const livenessDir = () => process.env.LIVENESS_STORAGE_DIR || path.join(__dirname, '..', 'storage', 'liveness');
 const LIVENESS_ID = /^lv_[A-Za-z0-9_-]{32}$/;
+exports.LIVENESS_ID = LIVENESS_ID;
 
 /** The passport picture to compare: the chip's (signed by the issuing country) if it was read, else the photo page. */
 async function passportPicture(scan) {
@@ -273,12 +244,8 @@ exports.FaceMatch = async (req, res) => {
 
         const picture = await passportPicture(scan);
         if (!picture) return res.status(422).json({error: 'no_passport_photo'});
-        let live;
-        try {
-            live = await fs.promises.readFile(path.join(livenessDir(), session.public_id, `attempt-${session.attempts}-0-center.jpg`));
-        } catch {
-            return res.status(422).json({error: 'no_liveness_photo'});
-        }
+        const live = await faceMatchHelper.livenessPhoto(session);
+        if (!live) return res.status(422).json({error: 'no_liveness_photo'});
 
         let result;
         try {
@@ -334,6 +301,21 @@ exports.AdminChipPhoto = async (req, res) => {
     } catch (err) {
         console.error('Passport admin chip photo failed:', err.message);
         return res.status(500).json({error: 'photo_failed'});
+    }
+};
+
+/** Every passport scan, for the admin site: `?status=passed&client_id=7&page=1&per_page=25`, newest first. */
+exports.AdminList = async (req, res) => {
+    const {where, page, perPage, limit, offset} = listQuery(req.query);
+    try {
+        const {rows, count} = await db.passport_scan.findAndCountAll({
+            where, order: [['created_at', 'DESC']], limit, offset,
+            include: [{model: db.client, attributes: ['id', 'name']}],
+        });
+        return res.json({scans: rows.map((s) => ({...s.toPublic(), client: s.client})), page, per_page: perPage, total: count});
+    } catch (err) {
+        console.error('Passport admin list failed:', err.message);
+        return res.status(500).json({error: 'scan_list_failed'});
     }
 };
 

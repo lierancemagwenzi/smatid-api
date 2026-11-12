@@ -17,6 +17,7 @@ const MAX_FRAME_BYTES = 600 * 1024;
 
 const storageDir = () => process.env.LIVENESS_STORAGE_DIR || path.join(__dirname, '..', 'storage', 'liveness');
 const SESSION_ID = /^lv_[A-Za-z0-9_-]{32}$/;
+const {listQuery} = require('../helpers/adminListHelper');
 const FRAME_NAME = /^attempt-\d+-\d+-[a-z_]+\.jpg$/;
 
 /** Where clients and people reach this service, for the hosted page's link. */
@@ -420,6 +421,33 @@ exports.RotateWebhookSecret = async (req, res) => {
 };
 
 // ----- Admin -----
+
+/**
+ * Every liveness check, for the admin site: `?status=passed&client_id=7&page=1&per_page=25`, newest first.
+ * `photo` is the frame to show for it (the last attempt's face, looking straight ahead), if one was kept.
+ */
+exports.AdminList = async (req, res) => {
+    const {where, page, perPage, limit, offset} = listQuery(req.query);
+    try {
+        const {rows, count} = await db.liveness_session.findAndCountAll({
+            where, order: [['created_at', 'DESC']], limit, offset,
+            include: [{model: db.client, attributes: ['id', 'name']}],
+        });
+        const sessions = await Promise.all(rows.map(async (s) => {
+            const photo = `attempt-${s.attempts}-0-center.jpg`;
+            const kept = s.attempts > 0 && await fs.promises.access(path.join(storageDir(), s.public_id, photo)).then(() => true, () => false);
+            return {
+                session_id: s.public_id, reference: s.reference || null, status: s.currentStatus(), failure_reason: s.failure_reason || null,
+                attempts: s.attempts, test: s.test, client: s.client, created_at: s.createdAt, completed_at: s.completed_at || null,
+                photo: kept ? photo : null,
+            };
+        }));
+        return res.json({sessions, page, per_page: perPage, total: count});
+    } catch (err) {
+        console.error('Liveness admin list failed:', err.message);
+        return res.status(500).json({error: 'session_list_failed'});
+    }
+};
 
 exports.AdminShow = async (req, res) => {
     try {

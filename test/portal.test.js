@@ -256,7 +256,7 @@ test('a portal user runs company and sanctions checks, charged and logged like A
 
     assert.strictEqual((await call('POST', '/api/portal/checks/company', {body: {number: '1234/2010'}})).status, 401);
     const options = await call('GET', '/api/portal/checks', {token: session});
-    assert.deepStrictEqual(options.body.checks.map((c) => [c.check_type, c.credit_cost, c.enabled]), [['company', 2, true], ['sanctions', 2, true]]);
+    assert.deepStrictEqual(options.body.checks.map((c) => [c.check_type, c.credit_cost, c.enabled]), [['company', 2, true], ['sanctions', 2, true], ['document', 2, true]]);
 
     const before = (await call('GET', '/api/portal/me', {token: session})).body.client.available_credits;
     const company = await call('POST', '/api/portal/checks/company', {token: session, body: {number: ' 1234/2010 '}});

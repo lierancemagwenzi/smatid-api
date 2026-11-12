@@ -1,0 +1,55 @@
+{
+  "version": 2,
+  "kind": "forgery-unet",
+  "trained_at": "2026-11-12T13:13:43Z",
+  "input": {
+    "name": "page",
+    "channels": 1,
+    "range": [
+      0,
+      1
+    ],
+    "multiple_of": 16,
+    "dpi": 150,
+    "page_width_px": 1240
+  },
+  "output": {
+    "name": "tampered",
+    "meaning": "probability each pixel was changed"
+  },
+  "page_threshold": 0.9997,
+  "pixel_threshold": 0.5,
+  "pool": 8,
+  "trained_on": {
+    "pages": 900,
+    "source": "generated (tools/docforensics/forge.py)"
+  },
+  "validation": {
+    "pages": 100,
+    "forged": 70,
+    "clean": 30,
+    "page_threshold": 0.9997,
+    "forged_caught": 49,
+    "clean_flagged": 0,
+    "page_recall": 0.7,
+    "page_false_alarm_rate": 0.0,
+    "page_auc": 0.899,
+    "pixel_precision": 0.202,
+    "pixel_recall": 0.635,
+    "pixel_f1": 0.307
+  },
+  "test": {
+    "pages": 200,
+    "forged": 140,
+    "clean": 60,
+    "page_threshold": 0.9997,
+    "forged_caught": 84,
+    "clean_flagged": 2,
+    "page_recall": 0.6,
+    "page_false_alarm_rate": 0.033,
+    "page_auc": 0.823,
+    "pixel_precision": 0.201,
+    "pixel_recall": 0.629,
+    "pixel_f1": 0.304
+  }
+}

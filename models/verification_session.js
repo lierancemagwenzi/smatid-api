@@ -42,6 +42,7 @@ module.exports = (sequelize, DataTypes) => {
         return_url: DataTypes.STRING(2048),
         status: {type: DataTypes.STRING(16), allowNull: false, defaultValue: 'pending'},
         passport_scan_id: DataTypes.STRING(64),
+        id_card_scan_id: DataTypes.STRING(64),
         liveness_session_id: DataTypes.STRING(64),
         skipped: jsonColumn(DataTypes, 'skipped'),
         result: jsonColumn(DataTypes, 'result'),

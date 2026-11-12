@@ -174,7 +174,11 @@ exports.RotateWebhookSecret = async (req, res) => {
 
 // ----- Checks run from the portal -----
 
-const PORTAL_CHECKS = [{check_type: 'company', module: 'companies-check'}, {check_type: 'sanctions', module: 'sanctions-check'}];
+const PORTAL_CHECKS = [
+    {check_type: 'company', module: 'companies-check'},
+    {check_type: 'sanctions', module: 'sanctions-check'},
+    {check_type: 'document', module: 'document-check'},
+];
 
 /** What each portal check costs and whether it's switched on. */
 exports.CheckOptions = async (req, res) => {

@@ -4,3 +4,7 @@
 storage/
 # The face model (38 MB): npm run models:download
 vendor/face/*.onnx
+# Forgery models that failed their tests, kept for comparison
+config/doc-models/rejected/
+# The forgery model's Python environment
+tools/docforensics/.venv/

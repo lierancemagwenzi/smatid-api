@@ -6,6 +6,8 @@
  * The answer comes in three bands rather than yes/no, because a passport photo can be ten years old,
  * small, and printed or compressed: "review" is for a person to look at.
  */
+const fs = require('fs');
+const path = require('path');
 const faceHelper = require('../liveness/faceHelper');
 const embedHelper = require('./faceEmbedHelper');
 
@@ -70,4 +72,15 @@ async function compare(passportJpeg, livenessJpeg) {
     };
 }
 
-module.exports = {compare, describe, thresholds, FaceMatchError};
+const livenessDir = () => process.env.LIVENESS_STORAGE_DIR || path.join(__dirname, '..', '..', 'storage', 'liveness');
+
+/** The face picture from a passed liveness check's last attempt, or null if it isn't there. */
+async function livenessPhoto(session) {
+    try {
+        return await fs.promises.readFile(path.join(livenessDir(), session.public_id, `attempt-${session.attempts}-0-center.jpg`));
+    } catch {
+        return null;
+    }
+}
+
+module.exports = {compare, describe, thresholds, livenessPhoto, FaceMatchError};

@@ -12,7 +12,11 @@
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "admin:create": "node scripts/createAdmin.js",
-    "models:download": "node scripts/downloadFaceModel.js"
+    "models:download": "node scripts/downloadFaceModel.js",
+    "idmodel:train": "node scripts/trainIdModel.js",
+    "idcard:synth": "sh tools/idcard-synth/make.sh",
+    "doccheck:samples": "node tools/doccheck/make-samples.js",
+    "docmodel:train": "node scripts/trainDocModel.js"
   },
   "engines": {
     "node": ">=20"
@@ -31,11 +35,13 @@
     "morgan": "^1.10.1",
     "mysql2": "^3.24.6",
     "onnxruntime-node": "^1.31.1",
+    "pdfjs-dist": "4.10.38",
     "qrcode": "^1.5.4",
     "sequelize": "^6.37.8"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
+    "pdf-lib": "1.17.1",
     "sequelize-cli": "^6.6.5"
   }
 }

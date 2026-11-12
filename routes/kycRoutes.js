@@ -42,6 +42,24 @@ module.exports = function (app) {
     app.route('/api/kyc/passport/:scanId/face-match')
         .post(auth.requireClient, requestLog.log('face_match'), modules.requireModule('face-match'), billing.charge('face_match'), passport.FaceMatch);
 
+    // ID cards: the SDK sends the country, the text it read off the card (lines with boxes) and the picture.
+    const idCard = require('../controllers/IdCardController');
+    app.route('/api/kyc/id-card')
+        .post(auth.requireClient, requestLog.log('id_card', {redact: ['image', 'ocr']}), modules.requireModule('id-card-check'), billing.charge('id_card'), idCard.Scan);
+    app.route('/api/kyc/id-card/:scanId')
+        .get(auth.requireClient, requestLog.log('id_card'), modules.requireModule('id-card-check'), idCard.Show);
+    app.route('/api/kyc/id-card/:scanId/image')
+        .get(auth.requireClient, modules.requireModule('id-card-check'), idCard.Image);
+    // The card's photo against the face from a passed liveness check.
+    // The document proofreader: a PDF's history, metadata, fonts, layout and sums.
+    const documents = require('../controllers/DocumentController');
+    app.route('/api/kyc/document')
+        .post(auth.requireClient, requestLog.log('document', {redact: ['file']}), modules.requireModule('document-check'), billing.charge('document'), documents.Check);
+    app.route('/api/kyc/document/:checkId')
+        .get(auth.requireClient, requestLog.log('document'), modules.requireModule('document-check'), documents.Show);
+    app.route('/api/kyc/id-card/:scanId/face-match')
+        .post(auth.requireClient, requestLog.log('face_match'), modules.requireModule('face-match'), billing.charge('face_match'), idCard.FaceMatch);
+
     // Verification sessions: a client opens one, the person does it in the Smatid Verify app, the client
     // reads the result. Each check the app runs is logged and charged to that client, as above.
     const verification = require('../controllers/VerificationController');
@@ -71,6 +89,12 @@ module.exports = function (app) {
     app.route('/api/verify/:verificationId/passport/:scanId/face-match')
         .post(vs('face_match'), verification.ownsScan, verification.sameLiveness, requestLog.log('face_match'), modules.requireModule('face-match'),
             billing.charge('face_match'), passport.FaceMatch);
+    app.route('/api/verify/:verificationId/id-card')
+        .post(vs('id_card'), requestLog.log('id_card', {redact: ['image', 'ocr']}), modules.requireModule('id-card-check'), billing.charge('id_card'),
+            verification.link('id_card_scan_id', 'scan_id'), idCard.Scan);
+    app.route('/api/verify/:verificationId/id-card/:scanId/face-match')
+        .post(vs('face_match'), verification.ownsIdCard, verification.sameLiveness, requestLog.log('face_match'), modules.requireModule('face-match'),
+            billing.charge('face_match'), idCard.FaceMatch);
     app.route('/api/verify/:verificationId/liveness')
         .post(vs('liveness'), requestLog.log('liveness'), modules.requireModule('liveness-check'), billing.charge('liveness'),
             verification.link('liveness_session_id', 'session_id'), liveness.Create);
@@ -162,16 +186,45 @@ module.exports = function (app) {
         .get(auth.requireAdmin, usage.List);
     app.route('/api/admin/requests/:id')
         .get(auth.requireAdmin, usage.Show);
+    // Admin: every scan, with its pictures.
+    app.route('/api/admin/liveness')
+        .get(auth.requireAdmin, liveness.AdminList);
     app.route('/api/admin/liveness/:sessionId')
         .get(auth.requireAdmin, liveness.AdminShow);
     app.route('/api/admin/liveness/:sessionId/frames/:frame')
         .get(auth.requireAdmin, liveness.AdminFrame);
+    app.route('/api/admin/passports')
+        .get(auth.requireAdmin, passport.AdminList);
     app.route('/api/admin/passport/:scanId')
         .get(auth.requireAdmin, passport.AdminShow);
     app.route('/api/admin/passport/:scanId/image')
         .get(auth.requireAdmin, passport.AdminImage);
     app.route('/api/admin/passport/:scanId/chip/photo')
         .get(auth.requireAdmin, passport.AdminChipPhoto);
+    // Admin: ID card scans, labelling them for training, and each country's trained model.
+    app.route('/api/admin/id-cards')
+        .get(auth.requireAdmin, idCard.AdminList);
+    app.route('/api/admin/id-cards/:scanId')
+        .get(auth.requireAdmin, idCard.AdminShow);
+    app.route('/api/admin/id-cards/:scanId/image')
+        .get(auth.requireAdmin, idCard.AdminImage);
+    app.route('/api/admin/id-cards/:scanId/label')
+        .put(auth.requireAdmin, idCard.AdminLabel);
+    // Admin: document checks, labelling them for the tamper classifier, and the classifier.
+    app.route('/api/admin/document-checks')
+        .get(auth.requireAdmin, documents.AdminList);
+    app.route('/api/admin/document-checks/:checkId')
+        .get(auth.requireAdmin, documents.AdminShow);
+    app.route('/api/admin/document-checks/:checkId/label')
+        .put(auth.requireAdmin, documents.AdminLabel);
+    app.route('/api/admin/doc-model')
+        .get(auth.requireAdmin, documents.AdminModel);
+    app.route('/api/admin/doc-model/reload')
+        .post(auth.requireAdmin, documents.AdminReloadModel);
+    app.route('/api/admin/id-models')
+        .get(auth.requireAdmin, idCard.AdminModels);
+    app.route('/api/admin/id-models/reload')
+        .post(auth.requireAdmin, idCard.AdminReloadModels);
     // The CSCA certificates passport chips are checked against; POST reads config/csca/ again.
     app.route('/api/admin/csca')
         .get(auth.requireAdmin, passport.AdminCsca)
@@ -222,6 +275,8 @@ module.exports = function (app) {
         .post(...checkAs, requestLog.log('company'), modules.requireModule('companies-check'), billing.charge('company'), company.Check);
     app.route('/api/portal/checks/sanctions')
         .post(...checkAs, requestLog.log('sanctions'), modules.requireModule('sanctions-check'), billing.charge('sanctions'), sanctions.Check);
+    app.route('/api/portal/checks/document')
+        .post(...checkAs, requestLog.log('document', {redact: ['file']}), modules.requireModule('document-check'), billing.charge('document'), documents.Check);
 
     // Public: what checks cost, for the website's pricing section. No sign-in.
     app.route('/api/public/pricing').get(async (req, res) => {

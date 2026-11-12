@@ -10,6 +10,9 @@ const TYPES = {
     passport: ['passport'],
     passport_chip: ['passport', 'chip'],
     full: ['passport', 'chip', 'liveness', 'face_match'],
+    // A national ID card instead of a passport (Zimbabwe for now). The face is matched to the card's photo.
+    id_card: ['id_card'],
+    id_card_full: ['id_card', 'liveness', 'face_match'],
 };
 
 // Steps the app may skip (with a reason) without the session failing: the phone may have no NFC, or
@@ -32,17 +35,20 @@ const showCode = (code) => `${code.slice(0, 4)}-${code.slice(4)}`;
 /** The app's link that opens this session. */
 const appLink = (publicId) => `smatid-verify://verify?id=${encodeURIComponent(publicId)}`;
 
-/** The scan and liveness check the app ran for this session, if any. */
+/** The passport scan, ID card scan and liveness check the app ran for this session, if any. */
 async function linked(session) {
-    const [scan, liveness] = await Promise.all([
+    const [scan, idCard, liveness] = await Promise.all([
         session.passport_scan_id ? db.passport_scan.findOne({where: {public_id: session.passport_scan_id, client_id: session.client_id}}) : null,
+        session.id_card_scan_id ? db.id_card_scan.findOne({where: {public_id: session.id_card_scan_id, client_id: session.client_id}}) : null,
         session.liveness_session_id ? db.liveness_session.findOne({where: {public_id: session.liveness_session_id, client_id: session.client_id}}) : null,
     ]);
-    return {scan, liveness};
+    return {scan, idCard, liveness};
 }
 
 /** passed, review, failed, skipped or not_done, for each of the type's steps. */
-function stepStatuses(session, {scan, liveness}) {
+function stepStatuses(session, {scan, idCard, liveness}) {
+    // The face is matched to the document the session is about.
+    const matched = (TYPES[session.type] || []).includes('id_card') ? idCard : scan;
     const skipped = session.skipped || {};
     const status = {};
     for (const step of TYPES[session.type] || []) {
@@ -51,12 +57,14 @@ function stepStatuses(session, {scan, liveness}) {
         if (step === 'chip' && scan && scan.chip) {
             s = scan.chip.status === 'verified' ? 'passed' : scan.chip.status === 'unverified' ? 'review' : 'failed';
         }
+        if (step === 'id_card' && idCard) s = {passed: 'passed', review: 'review'}[idCard.status] || 'failed';
         if (step === 'liveness' && liveness) {
             const ls = liveness.currentStatus();
             s = ls === 'passed' ? 'passed' : ['failed', 'expired'].includes(ls) ? 'failed' : 'not_done';
         }
-        if (step === 'face_match' && scan && scan.face_match) {
-            s = {match: 'passed', review: 'review'}[scan.face_match.status] || 'failed';
+        if (step === 'face_match' && matched && matched.face_match) {
+            // A card with no photo on it (the old metal ID) is for a person to look at, not a fail.
+            s = {match: 'passed', review: 'review', no_face_on_card: 'review'}[matched.face_match.status] || 'failed';
         }
         if (s === 'not_done' && skipped[step] && SKIPPABLE.includes(step)) s = 'skipped';
         status[step] = s;
@@ -90,6 +98,7 @@ async function clientView(session, baseUrl) {
         app_link: appLink(session.public_id),
         return_url: session.return_url,
         passport: checks.scan ? checks.scan.toPublic() : null,
+        id_card: checks.idCard ? checks.idCard.toPublic() : null,
         liveness: checks.liveness ? checks.liveness.toPublic(baseUrl) : null,
         opened_at: session.opened_at,
         completed_at: session.completed_at,
@@ -109,6 +118,7 @@ async function appView(session) {
         client_name: session.client ? session.client.name : null,
         status: session.currentStatus(),
         passport_scan_id: session.passport_scan_id,
+        id_card_scan_id: session.id_card_scan_id || null,
         liveness_session_id: session.liveness_session_id,
         expires_at: session.expires_at,
     };

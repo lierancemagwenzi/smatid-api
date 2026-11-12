@@ -85,7 +85,9 @@ module is disabled, or missing from the table, its endpoint answers every client
 | `liveness-check` | `POST /api/kyc/liveness`, `GET /api/kyc/liveness/:id` and the hosted page |
 | `passport-check` | `POST /api/kyc/passport`, `GET /api/kyc/passport/:id` (2 credits) |
 | `passport-chip` | `POST /api/kyc/passport/:id/chip`, `GET /api/kyc/passport/:id/chip/photo` (2 credits) |
-| `face-match` | `POST /api/kyc/passport/:id/face-match` (1 credit) |
+| `face-match` | `POST /api/kyc/passport/:id/face-match`, `POST /api/kyc/id-card/:id/face-match` (1 credit) |
+| `id-card-check` | `POST /api/kyc/id-card`, `GET /api/kyc/id-card/:id` (2 credits) |
+| `document-check` | `POST /api/kyc/document`, `GET /api/kyc/document/:id`, and the portal's "Proofread a document" page (3 credits) |
 
 The migration creates both as enabled. An admin can create more, e.g. `liveness-check`, ahead of the code:
 the list shows `connected: false` until an endpoint checks that key with
@@ -364,6 +366,134 @@ The reply is the scan, with `face_match`:
   people (at most 0.18). OpenCV's own bar for SFace is 0.363. Tune them as real checks come in.
 - Errors that mean no comparison was made (`400`, `404`, `409`, `422`) aren't charged.
 
+## ID cards
+
+The SDK scans the front of a national ID card, reads its text on the phone (ML Kit), and sends the lines
+with where each sits on the picture. The server decides what the card says, as it does with a passport's MRZ.
+**Zimbabwe** is supported for now: the metal card and the plastic card (the only two it issues).
+
+```bash
+curl -X POST localhost:8011/api/kyc/id-card -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{
+  "country": "ZW", "reference": "cust-42", "image": "<JPEG, base64>",
+  "ocr": {"lines": [{"text": "SURNAME", "box": [0.35, 0.33, 0.3, 0.04]}, {"text": "MOYO", "box": [0.35, 0.38, 0.3, 0.04]}, …]}
+}'
+# → 201 {"scan_id": "ic_…", "status": "passed", "card_type": "plastic", "extracted_by": "rules:ZW",
+#        "document": {"id_number": "63-1234567 D 42", "surname": "MOYO", "first_names": "TARIRO GRACE", "date_of_birth": "1990-03-12", …},
+#        "checks": {"id_check_letter": true, …}, "review_reasons": []}
+```
+
+- `box` is `[left, top, width, height]` as fractions of the picture.
+- `status`: `passed` (valid ID number and check letter, a name and a birth date), `review` (read, but see
+  `review_reasons`: `check_letter_mismatch`, `surname_not_separated` on the unlabelled metal card, …), or
+  `failed` (`invalid_date_of_birth`). No ID number found → `422 id_unreadable`, not charged: scan again.
+- **The Zimbabwean check letter** (district + serial, mod 23, `ZABCDEFGHJKLMNPQRSTVWXY`) matches all 4 real
+  plastic cards seen so far. A mismatch is still a `review`, since OCR misreading a letter looks the same as a
+  made-up number; set `ZW_CHECK_LETTER_STRICT=1` to fail them instead.
+- `POST /api/kyc/id-card/:id/face-match {liveness_session_id}` compares the card's photo with the live face.
+  A card with no face on it is recorded as `no_face_on_card` (a review in a session) and answers 422.
+- Pictures are kept in `storage/id-card/` (or `ID_CARD_STORAGE_DIR`); the OCR lines are kept with the scan.
+
+### Trained per country
+
+Each country is a profile in `helpers/idcard/countries/` (fields, labels, ID number rules, checks) and, once
+trained, a model in `config/id-models/<COUNTRY>.json` (or `ID_MODEL_DIR`): a field tagger that learns which
+line holds which field from where it sits and what's around it, and a card-type classifier.
+
+1. **Collect**: every scan keeps its picture and OCR. Until there's a model, the country's rules read cards
+   (`extracted_by: "rules:ZW"`).
+2. **Label**: in the admin site, **ID cards** shows each scan's picture next to what was read; correct it and
+   save. (`PUT /api/admin/id-cards/:id/label {card_type, fields}`.)
+3. **Train**: `npm run idmodel:train -- --country ZW` (`--dry-run` to only report). 20% of labelled scans are
+   held back to compare the model with the rules. The model is only used if it does at least as well and was
+   trained on at least `ID_MODEL_MIN_SAMPLES` (30) scans. The previous model is kept as `ZW.v<n>.json`.
+4. **Reload** on the running server: the button on the ID cards page, or `POST /api/admin/id-models/reload`.
+   Reads then say `extracted_by: "model:ZW@<version>"`; fields the model missed are filled from the rules.
+
+**No real cards yet?** `npm run idcard:synth -- 300` draws fake cards and reads them with Apple Vision, to train
+on before real scans come in (macOS; see `tools/idcard-synth/README.md`). A model tested only on drawn cards needs
+`--activate-synthetic` to be used.
+
+A new country: add `countries/<xx>.js`, register it in `helpers/idcard/index.js`, then collect, label, train.
+
+## Document proofreader
+
+Checks a PDF (bank statement, payslip, utility bill, or any document) for signs it was changed after it was issued.
+Clients use it from the API or the portal's **Proofread a document** page, which highlights each finding on the page.
+
+```bash
+curl -X POST localhost:8011/api/kyc/document -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"file\": \"$(base64 < statement.pdf | tr -d '\n')\", \"filename\": \"statement.pdf\"}"
+# → 201 {"check_id": "dc_…", "verdict": "suspicious", "score": 70, "document": {"type": "bank_statement", …},
+#        "findings": [{"category": "content", "code": "balance_mismatch", "severity": "high", "page": 1, "box": […], …}], …}
+```
+
+- **What it looks at** (`helpers/document/`):
+  - `structure.js`: saves appended on top of the original, the software of each save, signatures.
+  - `metadata.js`: PDF editors and image tools named in it, dates, Info against XMP.
+  - `fonts.js`: a font used only for a figure or two, the same font embedded twice.
+  - `layout.js`: text off its row's baseline, figures out of their column, text over text, white boxes and
+    annotations over text.
+  - `content.js`: the same field given two ways, impossible dates, Zimbabwean ID check letters.
+  - `types/*.js`: whether a statement's running balances, totals and dates hold together; whether a payslip's
+    earnings, deductions and net pay add up; whether a bill's charges and amount due add up.
+- **Verdict**: `clean`, `review` or `suspicious`, from a 0–100 score.
+  - Severities weigh 0 (info), 12 (warning) and 35 (high).
+  - Each category is capped at 70.
+  - Any high finding makes it suspicious.
+- **Privacy**: the PDF is read in memory and not kept. `document_checks` stores the report and the file's SHA-256,
+  and `checked_before` says how often the same file was sent. The request log stores `[n KB, not logged]` in place
+  of the file.
+- **Limits**: 15 MB (`DOC_MAX_MB`), 50 pages (`DOC_MAX_PAGES`), 30 s (`DOC_TIMEOUT_MS`). Errors are 400, 413 or 422,
+  and none are charged.
+- **Samples**: `npm run doccheck:samples` writes clean and doctored statements, payslips and bills to
+  `storage/doccheck-samples/` (made-up people), to try in the portal.
+
+### The two models
+
+**Tamper classifier** (`helpers/document/model.js`, `features.js`): logistic regression on 33 measurements per
+document. It sees the findings, and also what the rules only use past a threshold (how far the worst figure sits
+off its row or column), so it can learn the small signs the rules let through.
+
+1. **Label**: in the admin site, **Scans → Documents**, mark checks Genuine or Doctored once you know (from the
+   issuer or the applicant). `PUT /api/admin/document-checks/:id/label {verdict, note}`.
+2. **Train**: `npm run docmodel:train` (`--synthetic 600` adds generated documents; `--dry-run`; `--no-db`).
+   20% are held back to compare it with the rules. It's only **active** once it does at least as well as the rules
+   on held-back **real** documents and has `DOC_MODEL_MIN_SAMPLES` (30) to train on. Generated documents alone
+   need `--activate-synthetic`.
+3. **Reload**: the button on the Documents tab, or `POST /api/admin/doc-model/reload`.
+
+Reports carry `model: {tampered_probability, version, active}`. An active model adds a
+`model_suspects_tampering` finding at 70% or more. It never clears what the rules found.
+
+**Image forgery model** (`helpers/document/imageForensics.js`, `tools/docforensics/`): a small U-Net (0.4M
+parameters, fixed high-pass filters first) that marks the pixels of a scanned page that were changed. Scans are
+pages that are pictures with no text, which the text checks can't read. Its regions become
+`image_edited_region` findings, boxed on the page.
+
+```bash
+cd tools/docforensics && python3 -m venv .venv && .venv/bin/pip install torch==2.5.1 onnx==1.17.0 pillow==11.0.0 numpy==1.26.4
+.venv/bin/python forge.py --out ../../storage/docforensics/train --count 1000             # generated scans + masks
+.venv/bin/python forge.py --out ../../storage/docforensics/test --count 200 --start 100000
+.venv/bin/python train.py --data ../../storage/docforensics --out ../../config/doc-models  # → forensics.onnx + .json
+```
+
+- **Training data**: the pages and their forgeries are generated: figures retyped, copied over, spliced in from
+  another scan, smudged or shifted, each with a mask of the changed pixels. No public dataset is used: the good
+  ones (TruFor, DocTamper) don't allow commercial use.
+- **Its scores**: `forensics.json` holds its scores on held-out generated pages. Version 2, on 200 test pages:
+  - flagged 2 of 60 clean pages (3.3%) and caught 84 of 140 forged ones (60%), page AUC 0.82;
+  - by kind: retyped figures 97%, spliced patches 95%, smudges 100%; copy-moves within the page 48% and 1–2 px
+    digit shifts 54%, which leave almost no trace;
+  - how it does on real forged scans is unknown until real ones are collected. Until then its findings are
+    "look at" (`warning`): a flagged scan goes to `review`, never straight to `suspicious`.
+- **Installing a model**: `train.py --out` writes to a folder of your choice. Copy `forensics.onnx` and `.json` into
+  `config/doc-models/` only when its test false-alarm rate is low. Version 1 flagged 30% of clean pages, because
+  its training tiles never included the page title, so it was kept out (`config/doc-models/rejected/`).
+- **Without it**: if `forensics.onnx` is missing, scans get an `image_model_unavailable` note and no image
+  findings.
+- **Error level analysis**: it raised false alarms on clean generated scans, so it's only one of the classifier's
+  measurements, never a finding.
+
 ## Verification sessions (the Smatid Verify app)
 
 A client's app doesn't run the checks itself: it opens a **verification session** with its token, sends
@@ -371,7 +501,7 @@ the person to the **Smatid Verify** app, and reads the result. Smatid Verify hol
 is its key, and the session says what to check.
 
 ```bash
-# 1. The client opens a session. type: liveness | passport | passport_chip | full
+# 1. The client opens a session. type: liveness | passport | passport_chip | full | id_card | id_card_full
 curl -X POST localhost:8011/api/kyc/verifications -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"type": "full", "reference": "cust-42", "return_url": "acmewallet://kyc/done"}'
 # → 201 {"verification_id": "vs_…", "code": "K7QM-4P2X", "app_link": "smatid-verify://verify?id=vs_…", "status": "pending", …}
@@ -388,6 +518,8 @@ curl localhost:8011/api/kyc/verifications/vs_… -H "Authorization: Bearer $TOKE
 | `passport` | passport (photo page) |
 | `passport_chip` | passport, chip |
 | `full` | passport, chip, liveness, face_match |
+| `id_card` | id_card |
+| `id_card_full` | id_card, liveness, face_match (the face is matched to the card's photo) |
 
 The result has `status` (`pending`, `in_progress`, `completed`, `cancelled`, `expired`), each step
 (`passed`, `review`, `failed`, `skipped`, `not_done`), and, once completed, `outcome`:

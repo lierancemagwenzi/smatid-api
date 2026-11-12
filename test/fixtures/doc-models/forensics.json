@@ -1,0 +1,20 @@
+{
+  "version": 0,
+  "kind": "test-stub",
+  "input": {
+    "name": "page",
+    "channels": 1,
+    "range": [
+      0,
+      1
+    ],
+    "multiple_of": 16,
+    "dpi": 150
+  },
+  "output": {
+    "name": "tampered"
+  },
+  "page_threshold": 0.5,
+  "pixel_threshold": 0.5,
+  "pool": 8
+}

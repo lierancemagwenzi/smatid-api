@@ -125,6 +125,8 @@ exports.requireSession = function (step) {
 /** Only the scan, and the liveness check, this session made. */
 exports.ownsScan = (req, res, next) =>
     req.verification.passport_scan_id === req.params.scanId ? next() : res.status(404).json({error: 'scan_not_found'});
+exports.ownsIdCard = (req, res, next) =>
+    req.verification.id_card_scan_id === req.params.scanId ? next() : res.status(404).json({error: 'scan_not_found'});
 exports.ownsLiveness = (req, res, next) =>
     req.verification.liveness_session_id === req.params.sessionId ? next() : res.status(404).json({error: 'session_not_found'});
 
