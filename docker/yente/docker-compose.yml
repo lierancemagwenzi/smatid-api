@@ -2,7 +2,7 @@
 # https://github.com/opensanctions/yente/blob/main/docker-compose.yml
 #
 #   cd docker/yente
-#   OPENSANCTIONS_DELIVERY_TOKEN=... docker compose up -d
+#   docker compose up -d
 #
 # The first start downloads the data and builds the index, which takes a while. Until it's done,
 # /match answers 503 and the KYC service answers 502 screening_unavailable. After that, yente
@@ -40,11 +40,11 @@ services:
     environment:
       YENTE_INDEX_TYPE: "elasticsearch"
       YENTE_INDEX_URL: http://index:9200
-      # Commercial use needs a bulk data licence and its delivery token, from
-      # https://www.opensanctions.org/account/bulk/. For non-commercial use, switch to
-      # /app/manifests/civic.yml, which needs no token.
-      YENTE_MANIFEST: /app/manifests/commercial.yml
-      OPENSANCTIONS_DELIVERY_TOKEN: ${OPENSANCTIONS_DELIVERY_TOKEN}
+      # Non-commercial data (civic.yml), no token needed. For production/commercial use, switch to
+      # /app/manifests/commercial.yml and add
+      #   OPENSANCTIONS_DELIVERY_TOKEN: ${OPENSANCTIONS_DELIVERY_TOKEN}
+      # with a bulk data licence token from https://www.opensanctions.org/account/bulk/.
+      YENTE_MANIFEST: /app/manifests/civic.yml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
