@@ -608,7 +608,11 @@ The tests in `test/cipz.test.js` run against copies of the real pages saved in `
 `YENTE_URL` at either of these:
 
 - **Self-hosted:** run `docker/yente/docker-compose.yml` and use `http://localhost:8000`. No API key.
-  Commercial use needs an OpenSanctions bulk data licence and its delivery token.
+  The compose file loads the non-commercial data (`/app/manifests/civic.yml`), which needs no token
+  and is fine for development and testing. For production, switch `YENTE_MANIFEST` to
+  `/app/manifests/commercial.yml` and set `OPENSANCTIONS_DELIVERY_TOKEN` to the delivery token from an
+  OpenSanctions bulk data licence. The first start downloads the data and builds the index, which
+  can take a few hours. Elasticsearch also needs `vm.max_map_count=262144` on the host.
 - **Hosted:** use `https://api.opensanctions.org` and put your key in `YENTE_API_KEY`.
 
 ```bash
